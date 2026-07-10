@@ -1440,10 +1440,10 @@
     backdrop-filter: blur(18px);
 }
 .mini-tokyo-3d.is-london .london-search-panel {
-    top: 88px;
+    top: 110px;
     left: 16px;
     width: min(328px, calc(100% - 32px));
-    max-height: calc(100% - 104px);
+    max-height: calc(100% - 126px);
     border-radius: 24px;
     padding: 18px;
     opacity: 0;
@@ -2054,7 +2054,8 @@
         justify-content: space-between;
     }
     .mini-tokyo-3d.is-london .london-search-panel {
-        top: 132px;
+        top: 152px;
+        max-height: calc(100% - 168px);
     }
     .mini-tokyo-3d.is-london .london-station-drawer {
         left: 16px;
