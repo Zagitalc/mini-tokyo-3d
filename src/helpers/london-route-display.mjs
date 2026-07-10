@@ -7,6 +7,19 @@ import { lineString, point } from '@turf/helpers';
 const DEFAULT_MAX_STATION_DISTANCE_KM = 0.2;
 const DEFAULT_MAX_CORRIDOR_DETOUR_RATIO = 4;
 const DEFAULT_MAX_JOIN_DISTANCE_KM = 0.25;
+export const LONDON_LINE_ORDER = [
+    'bakerloo',
+    'central',
+    'circle',
+    'district',
+    'hammersmith-city',
+    'jubilee',
+    'metropolitan',
+    'northern',
+    'piccadilly',
+    'victoria',
+    'waterloo-city'
+];
 
 function isCoordinate(coord) {
     return Array.isArray(coord) && coord.length >= 2 &&
@@ -294,4 +307,158 @@ export function extractLondonRelationCorridors(match, stationCoords, options = {
     }
 
     return corridors;
+}
+
+function slugifyIdentity(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/^tfl\./, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+export function normalizeLondonCorridorEndpoints(fromGroup, toGroup) {
+    const endpoints = [String(fromGroup || ''), String(toGroup || '')].sort();
+    return {
+        fromGroup: endpoints[0],
+        toGroup: endpoints[1],
+        reversed: String(fromGroup || '') !== endpoints[0]
+    };
+}
+
+export function makeLondonCorridorId(fromGroup, toGroup, alignmentId) {
+    const normalized = normalizeLondonCorridorEndpoints(fromGroup, toGroup);
+    return [
+        slugifyIdentity(normalized.fromGroup),
+        slugifyIdentity(normalized.toGroup),
+        slugifyIdentity(alignmentId)
+    ].join('__');
+}
+
+function getLineOrderIndex(lineId, lineOrder) {
+    const index = lineOrder.indexOf(lineId);
+    return index === -1 ? lineOrder.length : index;
+}
+
+function compareLineIds(line1, line2, lineOrder) {
+    const order1 = getLineOrderIndex(line1, lineOrder);
+    const order2 = getLineOrderIndex(line2, lineOrder);
+    return order1 - order2 || line1.localeCompare(line2);
+}
+
+function selectCanonicalCorridor(records) {
+    return records.slice().sort((record1, record2) => {
+        const source1 = record1.geometrySource === 'osm' ? 0 : 1;
+        const source2 = record2.geometrySource === 'osm' ? 0 : 1;
+        const coordinateCount1 = (record1.coordinates || []).length;
+        const coordinateCount2 = (record2.coordinates || []).length;
+
+        return source1 - source2 || coordinateCount2 - coordinateCount1 ||
+            String(record1.railwayId || '').localeCompare(String(record2.railwayId || ''));
+    })[0];
+}
+
+export function canonicalizeLondonCorridors(records, {
+    lineOrder = LONDON_LINE_ORDER
+} = {}) {
+    const corridorLookup = new Map();
+
+    for (const record of records || []) {
+        if (!record || !record.fromGroup || !record.toGroup || !record.alignmentId || !record.lineId) continue;
+        const normalized = normalizeLondonCorridorEndpoints(record.fromGroup, record.toGroup);
+        const corridorId = makeLondonCorridorId(
+            normalized.fromGroup,
+            normalized.toGroup,
+            record.alignmentId
+        );
+        const coordinates = cleanLineCoordinates(record.coordinates);
+
+        if (coordinates.length < 2) continue;
+        const orientedRecord = {
+            ...record,
+            corridorId,
+            fromGroup: normalized.fromGroup,
+            toGroup: normalized.toGroup,
+            coordinates: normalized.reversed ? coordinates.slice().reverse() : coordinates
+        };
+
+        if (!corridorLookup.has(corridorId)) corridorLookup.set(corridorId, []);
+        corridorLookup.get(corridorId).push(orientedRecord);
+    }
+
+    const corridors = [];
+
+    for (const [corridorId, corridorRecords] of corridorLookup) {
+        const canonical = selectCanonicalCorridor(corridorRecords);
+        const lineLookup = new Map();
+
+        for (const record of corridorRecords) {
+            if (!lineLookup.has(record.lineId)) {
+                lineLookup.set(record.lineId, {
+                    lineId: record.lineId,
+                    color: record.color,
+                    railwayIds: new Set()
+                });
+            }
+            if (record.railwayId) lineLookup.get(record.lineId).railwayIds.add(record.railwayId);
+        }
+
+        const lines = Array.from(lineLookup.values())
+            .sort((line1, line2) => compareLineIds(line1.lineId, line2.lineId, lineOrder));
+        const laneCount = lines.length;
+
+        corridors.push({
+            corridorId,
+            alignmentId: canonical.alignmentId,
+            fromGroup: canonical.fromGroup,
+            toGroup: canonical.toGroup,
+            geometrySource: canonical.geometrySource,
+            coordinates: canonical.coordinates,
+            lines: lines.map((line, laneIndex) => ({
+                lineId: line.lineId,
+                color: line.color,
+                railwayIds: Array.from(line.railwayIds).sort(),
+                laneIndex,
+                laneCount,
+                laneOffset: laneIndex - (laneCount - 1) / 2
+            }))
+        });
+    }
+
+    return corridors.sort((corridor1, corridor2) => corridor1.corridorId.localeCompare(corridor2.corridorId));
+}
+
+export function buildLondonDisplayFeatureCollection(records, options) {
+    const corridors = canonicalizeLondonCorridors(records, options);
+    const features = [];
+
+    for (const corridor of corridors) {
+        for (const line of corridor.lines) {
+            features.push({
+                type: 'Feature',
+                geometry: {
+                    type: 'LineString',
+                    coordinates: corridor.coordinates
+                },
+                properties: {
+                    type: 'railway',
+                    id: `${corridor.corridorId}__${line.lineId}`,
+                    corridorId: corridor.corridorId,
+                    alignmentId: corridor.alignmentId,
+                    lineId: line.lineId,
+                    railwayIds: line.railwayIds,
+                    laneIndex: line.laneIndex,
+                    laneCount: line.laneCount,
+                    laneOffset: line.laneOffset,
+                    geometrySource: corridor.geometrySource,
+                    color: line.color || '#0098D4'
+                }
+            });
+        }
+    }
+
+    return {
+        type: 'FeatureCollection',
+        features
+    };
 }
