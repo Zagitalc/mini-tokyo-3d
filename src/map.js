@@ -24,7 +24,7 @@ import {
     selectLondonStationCandidate,
     shouldSkipLondonRouteEntry
 } from './helpers/london-live-trains.mjs';
-import { getLondonStationAnchor, smoothLondonStationLine } from './helpers/london-geometry.mjs';
+import { getLondonStationAnchor } from './helpers/london-geometry.mjs';
 import { applyLondonStationGroups } from './helpers/london-stations.mjs';
 import { GeoJsonLayer, ThreeLayer, Tile3DLayer, TrafficLayer } from './layers';
 import { loadBusData, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl } from './loader';
@@ -42,21 +42,6 @@ const LONDON_DEFAULT_SEGMENT_SPEED_KM_PER_SEC = 0.012;
 const LONDON_OVERLAP_PROGRESS_SPACING = 0.02;
 const LONDON_ROUTE_FEATURE_ZOOMS = [13, 14, 15, 16, 17, 18];
 const LONDON_THEME_STORAGE_KEY = 'mt3d:london-theme';
-const LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE = [
-    [9, 0.12],
-    [10, 0.24],
-    [11, 0.42],
-    [12, 0.68],
-    [13, 1.0],
-    [14, 1.18],
-    [15, 1.08],
-    [16, 0.9],
-    [17, 0.74],
-    [18, 0.58],
-    [19, 0.48]
-];
-const LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS = 4;
-
 const DEGREE_TO_RADIAN = Math.PI / 180;
 
 function escapeHTML(value) {
@@ -424,22 +409,40 @@ export default class extends Evented {
     }
 
     getLondonFallbackPaintExpressions() {
+        const lineWidth = [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 0.6,
+            10, 1.2,
+            11, 2.2,
+            12, 3.8,
+            13, 5.4,
+            14, 6.2,
+            15, 5.1,
+            16, 4.0,
+            17, 3.0,
+            18, 2.1,
+            19, 1.5
+        ];
+
         return {
-            lineWidth: [
+            lineWidth,
+            lineOffset: [
                 'interpolate',
                 ['linear'],
                 ['zoom'],
-                9, 0.6,
-                10, 1.2,
-                11, 2.2,
-                12, 3.8,
-                13, 5.4,
-                14, 6.2,
-                15, 5.1,
-                16, 4.0,
-                17, 3.0,
-                18, 2.1,
-                19, 1.5
+                9, ['*', ['coalesce', ['get', 'laneOffset'], 0], 2.6],
+                10, ['*', ['coalesce', ['get', 'laneOffset'], 0], 3.2],
+                11, ['*', ['coalesce', ['get', 'laneOffset'], 0], 4.2],
+                12, ['*', ['coalesce', ['get', 'laneOffset'], 0], 5.8],
+                13, ['*', ['coalesce', ['get', 'laneOffset'], 0], 7.4],
+                14, ['*', ['coalesce', ['get', 'laneOffset'], 0], 8.2],
+                15, ['*', ['coalesce', ['get', 'laneOffset'], 0], 7.1],
+                16, ['*', ['coalesce', ['get', 'laneOffset'], 0], 6.0],
+                17, ['*', ['coalesce', ['get', 'laneOffset'], 0], 5.0],
+                18, ['*', ['coalesce', ['get', 'laneOffset'], 0], 4.1],
+                19, ['*', ['coalesce', ['get', 'laneOffset'], 0], 3.5]
             ],
             lineOpacity: [
                 'interpolate',
@@ -562,23 +565,6 @@ export default class extends Evented {
             map.addLayer(layer, beforeId);
         } else {
             map.addLayer(layer);
-        }
-    }
-
-    updateLondon3DRailLineWidthScale(zoom) {
-        const me = this;
-        const map = me.map;
-
-        if (me.getCityFromLocation() !== 'london' || !map || !me._londonHas3dRailLines) {
-            return;
-        }
-
-        const lineWidthScale = getZoomProfileValue(zoom, LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-        for (let z = 13; z <= 18; z++) {
-            const layerId = `london-railways-3d-${z}`;
-            if (map.getLayer(layerId)) {
-                helpersMapbox.setLayerProps(map, layerId, { lineWidthScale });
-            }
         }
     }
 
@@ -1312,49 +1298,10 @@ export default class extends Evented {
             data: helpersGeojson.featureFilter(featureCollection, p => p.altitude === 0)
         });
 
-        // London: add a deck.gl rail line layer so 3D trains align with the line at pitch.
-        if (isLondon && featureCollection && (featureCollection.features || []).length) {
-            me._londonRailGeoBase = me.buildLondonRailGeoJSON();
-            me._londonRailLineDataBase = helpersGeojson.featureFilter(
-                me._londonRailGeoBase,
-                p => p.type === 'railway'
-            );
-            const londonRailLineData = me.getFilteredLondonRailLineGeoJSON();
-
-            for (const zoom of [13, 14, 15, 16, 17, 18]) {
-                const lineWidthScale = getZoomProfileValue(initialZoom, LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-                if (!londonRailLineData.features.length) continue;
-                const layerId = `london-railways-3d-${zoom}`;
-                me.addLayer({
-                    id: layerId,
-                    type: 'geojson',
-                    data: londonRailLineData,
-                    filled: false,
-                    getLineWidth: d => d.properties.width || 8,
-                    getLineColor: d => helpers.colorToRGBArray(d.properties.color || '#0098D4'),
-                    lineWidthUnits: 'pixels',
-                    lineWidthScale,
-                    parameters: { depthTest: false },
-                    minzoom: zoom <= 13 ? 0 : zoom,
-                    maxzoom: zoom >= 18 ? 24 : zoom + 1
-                }, 'trees');
-                if (map.getLayer(layerId)) {
-                    map.setLayoutProperty(layerId, 'visibility', 'visible');
-                }
-            }
-            me._londonHas3dRailLines = true;
-            me.updateLondon3DRailLineWidthScale(initialZoom);
-        }
-
-
-
-        // London fallback rendering (when features.json etc. are not generated)
+        // London display rendering is independent from the train-motion feature collection.
         if (me.getCityFromLocation() === 'london') {
-            const londonGeoBase = me._londonRailGeoBase || me.buildLondonRailGeoJSON();
+            const londonGeoBase = me.buildLondonRailGeoJSON();
             me._londonRailGeoBase = londonGeoBase;
-            if (!me._londonRailLineDataBase) {
-                me._londonRailLineDataBase = helpersGeojson.featureFilter(londonGeoBase, p => p.type === 'railway');
-            }
             const londonGeo = me.getFilteredLondonRailGeoJSON() || londonGeoBase;
             const londonPaint = me.getLondonFallbackPaintExpressions();
             const ensureLondonFallbackLayers = () => {
@@ -1373,7 +1320,7 @@ export default class extends Evented {
                         paint: {
                             'line-color': ['get', 'color'],
                             'line-width': londonPaint.lineWidth,
-                            'line-offset': ['coalesce', ['get', 'lineOffset'], 0],
+                            'line-offset': londonPaint.lineOffset,
                             'line-opacity': londonPaint.lineOpacity
                         }
                     });
@@ -1433,9 +1380,7 @@ export default class extends Evented {
                 if (map.getSource('london-rail')) {
                     map.getSource('london-rail').setData(londonGeo);
                     ensureLondonFallbackLayers();
-                    if (me._londonHas3dRailLines && useLondonLiveTrains3d && map.getLayer('london-railways')) {
-                        map.setLayoutProperty('london-railways', 'visibility', 'none');
-                    } else if (map.getLayer('london-railways')) {
+                    if (map.getLayer('london-railways')) {
                         map.setLayoutProperty('london-railways', 'visibility', 'visible');
                     }
                 } else {
@@ -1445,10 +1390,6 @@ export default class extends Evented {
                     });
 
                     ensureLondonFallbackLayers();
-
-                    if (me._londonHas3dRailLines && useLondonLiveTrains3d) {
-                        map.setLayoutProperty('london-railways', 'visibility', 'none');
-                    }
 
                     // Auto-zoom to the fallback data so it's obvious when it works
                     const bounds = new LngLatBounds();
@@ -1788,10 +1729,6 @@ export default class extends Evented {
                 prevLayerZoom = me.layerZoom,
                 layerZoom = me.layerZoom = getLayerZoom(zoom);
 
-            if (me.getCityFromLocation() === 'london') {
-                me.updateLondon3DRailLineWidthScale(zoom);
-            }
-
             if (zoom < 13) {
                 const lineWidthScale = helpers.clamp(Math.pow(2, zoom - 12), .125, 1);
 
@@ -2036,31 +1973,6 @@ export default class extends Evented {
             return coords;
         };
 
-        const getGroupedRailwayAnchors = railway => {
-            const groups = [];
-
-            for (const station of railway.stations || []) {
-                if (!station) continue;
-                const group = groupBase(station.group || station.id);
-                if (!group) continue;
-                if (groups[groups.length - 1] === group) continue;
-                groups.push(group);
-            }
-
-            if (groups.length < 2) return null;
-
-            const anchors = groups.map(group => {
-                const entry = stationGroupLookup.get(group);
-                return entry && Array.isArray(entry.anchor) ? entry.anchor : null;
-            });
-
-            if (anchors.some(anchor => !Array.isArray(anchor))) {
-                return null;
-            }
-
-            return { groups, anchors };
-        };
-
         const railwayLineCoordsLookup = new Map();
         for (const rw of me.railways.getAll()) {
             if (!rw) continue;
@@ -2189,170 +2101,10 @@ export default class extends Evented {
             });
         }
 
-        const getLineEdgeDistance = edge => {
-            if (!Number.isFinite(edge.distance)) {
-                edge.distance = turfDistance(edge.fromCoord, edge.toCoord);
-            }
-            return edge.distance;
-        };
-        const buildLineAdjacency = edgeMap => {
-            const adjacency = new Map();
-
-            for (const edge of edgeMap.values()) {
-                const distance = getLineEdgeDistance(edge);
-
-                if (!adjacency.has(edge.fromGroup)) adjacency.set(edge.fromGroup, []);
-                if (!adjacency.has(edge.toGroup)) adjacency.set(edge.toGroup, []);
-
-                adjacency.get(edge.fromGroup).push({
-                    node: edge.toGroup,
-                    segmentKey: edge.segmentKey,
-                    distance
-                });
-                adjacency.get(edge.toGroup).push({
-                    node: edge.fromGroup,
-                    segmentKey: edge.segmentKey,
-                    distance
-                });
-            }
-
-            return adjacency;
-        };
-        const getAlternativeLineDistance = (adjacency, fromGroup, toGroup, skippedSegmentKey) => {
-            const distances = new Map([[fromGroup, 0]]);
-            const queue = [{ node: fromGroup, distance: 0 }];
-
-            while (queue.length) {
-                queue.sort((a, b) => a.distance - b.distance);
-                const current = queue.shift();
-
-                if (!current || current.distance !== distances.get(current.node)) continue;
-                if (current.node === toGroup) return current.distance;
-
-                for (const edge of adjacency.get(current.node) || []) {
-                    if (edge.segmentKey === skippedSegmentKey) continue;
-                    const nextDistance = current.distance + edge.distance;
-                    if (nextDistance >= (distances.has(edge.node) ? distances.get(edge.node) : Infinity)) continue;
-                    distances.set(edge.node, nextDistance);
-                    queue.push({
-                        node: edge.node,
-                        distance: nextDistance
-                    });
-                }
-            }
-
-            return Infinity;
-        };
-        const lineEdgeLookup = new Map();
-        for (const rw of me.railways.getAll()) {
-            if (!rw || !Array.isArray(rw.stations) || rw.stations.length < 2) continue;
-
-            const grouped = getGroupedRailwayAnchors(rw);
-            if (!grouped) continue;
-
-            const { groups, anchors } = grouped;
-            const smoothedAnchors = smoothLondonStationLine(anchors, LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS);
-            const lineKey = String(rw.lineId || rw.id || '').toLowerCase();
-            const edgeMap = lineEdgeLookup.get(lineKey) || new Map();
-            if (!lineEdgeLookup.has(lineKey)) {
-                lineEdgeLookup.set(lineKey, edgeMap);
-            }
-
-            for (let i = 0; i < groups.length - 1; i++) {
-                const fromGroup = groups[i];
-                const toGroup = groups[i + 1];
-                const segmentKey = [fromGroup, toGroup].sort().join('|');
-                const startIndex = i * LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS;
-                const endIndex = (i + 1) * LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS;
-                const segmentCoords = smoothedAnchors.slice(startIndex, endIndex + 1);
-
-                if (!Array.isArray(segmentCoords) || segmentCoords.length < 2) continue;
-                if (edgeMap.has(segmentKey)) continue;
-
-                edgeMap.set(segmentKey, {
-                    id: `${rw.id}.seg.${i}`,
-                    railwayId: rw.id,
-                    lineId: lineKey,
-                    color: rw.color || '#00a3e0',
-                    segmentKey,
-                    segmentDirection: fromGroup <= toGroup ? 1 : -1,
-                    fromGroup,
-                    toGroup,
-                    fromCoord: anchors[i],
-                    toCoord: anchors[i + 1],
-                    coordinates: segmentCoords,
-                    lineOffset: 0,
-                    distance: turfDistance(anchors[i], anchors[i + 1])
-                });
-            }
-        }
-
-        const segmentFeatures = [];
-        for (const edgeMap of lineEdgeLookup.values()) {
-            const adjacency = buildLineAdjacency(edgeMap);
-
-            for (const edge of edgeMap.values()) {
-                const alternativeDistance = getAlternativeLineDistance(
-                    adjacency,
-                    edge.fromGroup,
-                    edge.toGroup,
-                    edge.segmentKey
-                );
-
-                if (Number.isFinite(alternativeDistance) &&
-                    alternativeDistance <= getLineEdgeDistance(edge) * 1.35) {
-                    continue;
-                }
-
-                segmentFeatures.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: edge.coordinates
-                    },
-                    properties: {
-                        type: 'railway',
-                        id: edge.id,
-                        railwayId: edge.railwayId,
-                        lineId: edge.lineId,
-                        color: edge.color,
-                        segmentKey: edge.segmentKey,
-                        segmentDirection: edge.segmentDirection,
-                        lineOffset: edge.lineOffset
-                    }
-                });
-            }
-        }
-
-        const overlapLookup = new Map();
-        for (const feature of segmentFeatures) {
-            const key = feature.properties.segmentKey;
-            if (!key) continue;
-            const list = overlapLookup.get(key);
-            if (list) {
-                list.push(feature);
-            } else {
-                overlapLookup.set(key, [feature]);
-            }
-        }
-
-        const offsetStepPx = 4;
-        for (const list of overlapLookup.values()) {
-            if (list.length < 2) continue;
-            list.sort((a, b) => {
-                const ra = a.properties.railwayId || '';
-                const rb = b.properties.railwayId || '';
-                return ra.localeCompare(rb);
-            });
-            const center = (list.length - 1) / 2;
-            list.forEach((feature, index) => {
-                const base = (index - center) * offsetStepPx;
-                const direction = feature.properties.segmentDirection || 1;
-                feature.properties.lineOffset = base * direction;
-            });
-        }
-
-        fc.features.push(...segmentFeatures);
+        const displayFeatures = me.londonRailDisplayData &&
+            Array.isArray(me.londonRailDisplayData.features) ?
+            me.londonRailDisplayData.features : [];
+        fc.features.push(...displayFeatures);
         me._londonStationPopupLookup = popupLookup;
         return fc;
     }
@@ -2547,16 +2299,6 @@ export default class extends Evented {
         return buildFeatureCollection(me.getFilteredLondonRailFeatures(base.features));
     }
 
-    getFilteredLondonRailLineGeoJSON() {
-        const me = this;
-        const base = me._londonRailLineDataBase;
-
-        if (!base || !Array.isArray(base.features)) {
-            return null;
-        }
-        return buildFeatureCollection(me.getFilteredLondonRailFeatures(base.features));
-    }
-
     getEffectiveLondonLineFilters() {
         const me = this;
         const lineFilters = me._londonLineFilters || new Set();
@@ -2601,21 +2343,6 @@ export default class extends Evented {
         const filteredGeo = me.getFilteredLondonRailGeoJSON();
         if (filteredGeo && map.getSource('london-rail')) {
             map.getSource('london-rail').setData(filteredGeo);
-        }
-
-        const filtered3d = me.getFilteredLondonRailLineGeoJSON();
-        if (filtered3d) {
-            const lineWidthScale = getZoomProfileValue(map.getZoom(), LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-
-            for (let z = 13; z <= 18; z++) {
-                const layerId = `london-railways-3d-${z}`;
-                if (map.getLayer(layerId)) {
-                    helpersMapbox.setLayerProps(map, layerId, {
-                        data: filtered3d,
-                        lineWidthScale
-                    });
-                }
-            }
         }
 
         if (restartLiveTrains && me.useLondonLiveTrains && me.useLondonLiveTrains3d) {
@@ -5613,7 +5340,7 @@ export default class extends Evented {
                             paint: {
                                 'line-color': ['get', 'color'],
                                 'line-width': londonPaint.lineWidth,
-                                'line-offset': ['coalesce', ['get', 'lineOffset'], 0],
+                                'line-offset': londonPaint.lineOffset,
                                 'line-opacity': londonPaint.lineOpacity
                             }
                         }, 'trees');
@@ -7235,25 +6962,6 @@ function createInterpolant(xs, ys) {
         const diff = x - xs[i], diffSq = diff * diff;
         return ys[i] + c1s[i] * diff + c2s[i] * diffSq + c3s[i] * diff * diffSq;
     };
-}
-
-function getZoomProfileValue(zoom, profile) {
-    if (!Array.isArray(profile) || !profile.length) {
-        return 1;
-    }
-    if (zoom <= profile[0][0]) {
-        return profile[0][1];
-    }
-    for (let i = 1; i < profile.length; i++) {
-        const prev = profile[i - 1];
-        const curr = profile[i];
-
-        if (zoom <= curr[0]) {
-            const ratio = (zoom - prev[0]) / (curr[0] - prev[0] || 1);
-            return prev[1] + (curr[1] - prev[1]) * ratio;
-        }
-    }
-    return profile[profile.length - 1][1];
 }
 
 function getLayerZoom(zoom) {
