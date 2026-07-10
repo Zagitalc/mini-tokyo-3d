@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    areLondonCorridorAlignmentsEquivalent,
+    assignLondonAlignmentIds,
     buildTangentClampedFallback,
     buildLondonDisplayFeatureCollection,
     canonicalizeLondonCorridors,
@@ -209,4 +211,45 @@ test('display filtering does not recalculate build-time lane metadata', () => {
     assert.deepEqual(before.map(value => value.laneOffset), [-1.5, -0.5, 0.5, 1.5]);
     assert.deepEqual(visible.map(feature => feature.properties.laneOffset), [-1.5, 0.5, 1.5]);
     assert.equal(visible.every(feature => feature.properties.laneCount === 4), true);
+});
+
+test('alignment assignment merges geometrically equivalent paths across relations', () => {
+    const records = assignLondonAlignmentIds([
+        corridorRecord({
+            alignmentId: undefined,
+            sourceAlignmentId: 'osm-relation-1:path-1'
+        }),
+        corridorRecord({
+            alignmentId: undefined,
+            sourceAlignmentId: 'osm-relation-2:path-1',
+            lineId: 'metropolitan',
+            coordinates: [[-0.12, 51.50001], [-0.11, 51.50001]]
+        })
+    ]);
+
+    assert.equal(records[0].alignmentId, records[1].alignmentId);
+});
+
+test('alignment assignment separates materially different paths with the same endpoints', () => {
+    const records = assignLondonAlignmentIds([
+        corridorRecord({
+            alignmentId: undefined,
+            sourceAlignmentId: 'osm-relation-1:path-1'
+        }),
+        corridorRecord({
+            alignmentId: undefined,
+            sourceAlignmentId: 'osm-relation-2:path-1',
+            lineId: 'metropolitan',
+            coordinates: [[-0.12, 51.5], [-0.115, 51.505], [-0.11, 51.5]]
+        })
+    ], { maxMeanDistanceKm: 0.01, maxDistanceKm: 0.02 });
+
+    assert.notEqual(records[0].alignmentId, records[1].alignmentId);
+});
+
+test('alignment equivalence is direction independent', () => {
+    assert.equal(areLondonCorridorAlignmentsEquivalent(
+        [[-0.12, 51.5], [-0.11, 51.5]],
+        [[-0.11, 51.5], [-0.12, 51.5]]
+    ), true);
 });

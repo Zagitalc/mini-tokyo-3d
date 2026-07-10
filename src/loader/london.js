@@ -10,6 +10,7 @@ import {
 } from '../helpers/london-geometry.mjs';
 import { updateDistances } from '../helpers/helpers-geojson';
 import { loadJSON, saveJSON } from './helpers';
+import buildLondonRouteDisplay from './london-route-display';
 
 const DATA_DIR = process.env.MT3D_DATA_DIR || 'data';
 const TFL_LINE_COLORS = {
@@ -249,9 +250,16 @@ export default async function () {
 
     const stationLookup = new Map(stations.map(st => [st.id, st]));
     const featureCollection = buildFeatures(railways, stationLookup, geometryLookup);
+    const routeDisplayFeatureCollection = await buildLondonRouteDisplay(
+        railways,
+        stations,
+        stationGroups,
+        DATA_DIR
+    );
     const railDirections = buildRailDirections(railways);
 
     saveJSON('build/data/features.json.gz', featureCollection);
+    saveJSON('build/data/london-route-display.json.gz', routeDisplayFeatureCollection);
     saveJSON('build/data/rail-directions.json.gz', railDirections);
     saveJSON('build/data/station-groups.json.gz', stationGroups);
     saveJSON('build/data/train-types.json.gz', []);

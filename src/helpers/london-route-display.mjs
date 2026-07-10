@@ -1,8 +1,9 @@
 import nearestPointOnLine from '@turf/nearest-point-on-line';
+import along from '@turf/along';
 import lineSliceAlong from '@turf/line-slice-along';
 import turfDistance from '@turf/distance';
 import turfLength from '@turf/length';
-import { lineString, point } from '@turf/helpers';
+import {lineString, point} from '@turf/helpers';
 
 const DEFAULT_MAX_STATION_DISTANCE_KM = 0.2;
 const DEFAULT_MAX_CORRIDOR_DETOUR_RATIO = 4;
@@ -63,15 +64,15 @@ export function stitchOsmRelationParts(parts, maxJoinDistanceKm = DEFAULT_MAX_JO
         for (let index = 0; index < remaining.length; index++) {
             const candidate = remaining[index];
             const joins = [
-                { distance: endpointDistance(stitched, false, candidate, true), prepend: false, reverse: false },
-                { distance: endpointDistance(stitched, false, candidate, false), prepend: false, reverse: true },
-                { distance: endpointDistance(stitched, true, candidate, false), prepend: true, reverse: false },
-                { distance: endpointDistance(stitched, true, candidate, true), prepend: true, reverse: true }
+                {distance: endpointDistance(stitched, false, candidate, true), prepend: false, reverse: false},
+                {distance: endpointDistance(stitched, false, candidate, false), prepend: false, reverse: true},
+                {distance: endpointDistance(stitched, true, candidate, false), prepend: true, reverse: false},
+                {distance: endpointDistance(stitched, true, candidate, true), prepend: true, reverse: true}
             ];
 
             for (const join of joins) {
                 if (!best || join.distance < best.distance) {
-                    best = { ...join, index };
+                    best = {...join, index};
                 }
             }
         }
@@ -92,7 +93,7 @@ export function stitchOsmRelationParts(parts, maxJoinDistanceKm = DEFAULT_MAX_JO
 }
 
 function getRelationIdentity(feature, index) {
-    const properties = feature && feature.properties || {};
+    const properties = (feature && feature.properties) || {};
     const rawId = properties['@id'] || properties.id || properties.osm_id || `feature-${index}`;
     return String(rawId).replace(/^relation\//, 'osm-relation-');
 }
@@ -100,15 +101,15 @@ function getRelationIdentity(feature, index) {
 export function collectOsmRelationCandidates(geojson) {
     const candidates = [];
 
-    for (const [index, feature] of (geojson && geojson.features || []).entries()) {
+    for (const [index, feature] of ((geojson && geojson.features) || []).entries()) {
         const geometry = feature && feature.geometry;
-        const properties = feature && feature.properties || {};
+        const properties = (feature && feature.properties) || {};
 
         if (!geometry || properties.route !== 'subway') continue;
 
-        const parts = geometry.type === 'LineString'
-            ? [geometry.coordinates]
-            : geometry.type === 'MultiLineString' ? geometry.coordinates : [];
+        const parts = geometry.type === 'LineString' ?
+            [geometry.coordinates] :
+            geometry.type === 'MultiLineString' ? geometry.coordinates : [];
         const coordinates = stitchOsmRelationParts(parts);
 
         if (coordinates.length < 2) continue;
@@ -151,7 +152,7 @@ export function projectStationsMonotonically(coordinates, stationCoords, {
     const cleanStations = (stationCoords || []).filter(isCoordinate);
 
     if (cleanCoordinates.length < 2 || cleanStations.length < 2) {
-        return { valid: false, reason: 'insufficient-coordinates' };
+        return {valid: false, reason: 'insufficient-coordinates'};
     }
 
     const forwardLine = lineString(cleanCoordinates);
@@ -169,7 +170,7 @@ export function projectStationsMonotonically(coordinates, stationCoords, {
     return {
         valid: inversions === 0 && maxDistance <= maxStationDistanceKm,
         reason: inversions ? 'non-monotonic-stations' :
-            maxDistance > maxStationDistanceKm ? 'station-too-far-from-path' : null,
+        maxDistance > maxStationDistanceKm ? 'station-too-far-from-path' : null,
         coordinates: orientedCoordinates,
         stationOffsets: projection.map(value => value.offset),
         stationDistances: projection.map(value => value.distance),
@@ -187,7 +188,7 @@ export function matchOsmRelationCandidate(candidates, stationCoords, options) {
 
         if (!projection.valid) continue;
         if (!best || projection.score < best.projection.score) {
-            best = { candidate, projection };
+            best = {candidate, projection};
         }
     }
 
@@ -201,24 +202,24 @@ export function validateLondonCorridorGeometry(coordinates, startCoord, endCoord
     const cleanCoordinates = cleanLineCoordinates(coordinates);
 
     if (cleanCoordinates.length < 2 || !isCoordinate(startCoord) || !isCoordinate(endCoord)) {
-        return { valid: false, reason: 'insufficient-coordinates' };
+        return {valid: false, reason: 'insufficient-coordinates'};
     }
 
     const startDistance = turfDistance(point(startCoord), point(cleanCoordinates[0]));
     const endDistance = turfDistance(point(endCoord), point(cleanCoordinates[cleanCoordinates.length - 1]));
 
     if (startDistance > maxEndpointDistanceKm || endDistance > maxEndpointDistanceKm) {
-        return { valid: false, reason: 'endpoint-too-far' };
+        return {valid: false, reason: 'endpoint-too-far'};
     }
 
     const directLength = Math.max(turfDistance(point(startCoord), point(endCoord)), 0.001);
     const pathLength = turfLength(lineString(cleanCoordinates));
 
     if (!Number.isFinite(pathLength) || pathLength > directLength * maxDetourRatio + 0.5) {
-        return { valid: false, reason: 'excessive-detour' };
+        return {valid: false, reason: 'excessive-detour'};
     }
 
-    return { valid: true, coordinates: cleanCoordinates, pathLength, directLength };
+    return {valid: true, coordinates: cleanCoordinates, pathLength, directLength};
 }
 
 function clampVector(origin, target, maxLength) {
@@ -270,7 +271,7 @@ export function buildTangentClampedFallback(previousCoord, startCoord, endCoord,
 export function extractLondonRelationCorridors(match, stationCoords, options = {}) {
     if (!match || !match.projection || !match.candidate) return [];
 
-    const { projection, candidate } = match;
+    const {projection, candidate} = match;
     const line = lineString(projection.coordinates);
     const corridors = [];
 
@@ -295,14 +296,14 @@ export function extractLondonRelationCorridors(match, stationCoords, options = {
             alignmentId: candidate.alignmentId,
             geometrySource: useFallback ? 'fallback' : 'osm',
             validationReason: useFallback ? validation.reason : null,
-            coordinates: useFallback
-                ? buildTangentClampedFallback(
+            coordinates: useFallback ?
+                buildTangentClampedFallback(
                     stationCoords[index - 1],
                     startCoord,
                     endCoord,
                     stationCoords[index + 2]
-                )
-                : validation.coordinates
+                ) :
+                validation.coordinates
         });
     }
 
@@ -426,6 +427,80 @@ export function canonicalizeLondonCorridors(records, {
     }
 
     return corridors.sort((corridor1, corridor2) => corridor1.corridorId.localeCompare(corridor2.corridorId));
+}
+
+function sampleLineCoordinates(coordinates, sampleCount = 9) {
+    const line = lineString(coordinates);
+    const length = turfLength(line);
+    const samples = [];
+
+    for (let index = 0; index < sampleCount; index++) {
+        samples.push(along(line, length * index / (sampleCount - 1)).geometry.coordinates);
+    }
+    return {line, length, samples};
+}
+
+function getSampleDistances(samples, line) {
+    return samples.map(coord => nearestPointOnLine(line, point(coord)).properties.dist);
+}
+
+export function areLondonCorridorAlignmentsEquivalent(coordinates1, coordinates2, {
+    maxMeanDistanceKm = 0.04,
+    maxDistanceKm = 0.09,
+    maxLengthRatio = 1.5
+} = {}) {
+    const clean1 = cleanLineCoordinates(coordinates1);
+    const clean2 = cleanLineCoordinates(coordinates2);
+
+    if (clean1.length < 2 || clean2.length < 2) return false;
+
+    const sampled1 = sampleLineCoordinates(clean1);
+    const sampled2 = sampleLineCoordinates(clean2);
+    const minLength = Math.max(Math.min(sampled1.length, sampled2.length), 0.001);
+    const lengthRatio = Math.max(sampled1.length, sampled2.length) / minLength;
+
+    if (lengthRatio > maxLengthRatio) return false;
+
+    const distances = getSampleDistances(sampled1.samples, sampled2.line)
+        .concat(getSampleDistances(sampled2.samples, sampled1.line));
+    const meanDistance = distances.reduce((sum, value) => sum + value, 0) / distances.length;
+
+    return Math.max(...distances) <= maxDistanceKm && meanDistance <= maxMeanDistanceKm;
+}
+
+export function assignLondonAlignmentIds(records, options) {
+    const endpointLookup = new Map();
+    const output = [];
+    const sortedRecords = (records || []).slice().sort((record1, record2) => {
+        const source1 = record1.geometrySource === 'osm' ? 0 : 1;
+        const source2 = record2.geometrySource === 'osm' ? 0 : 1;
+        return source1 - source2 ||
+            String(record1.sourceAlignmentId || '').localeCompare(String(record2.sourceAlignmentId || '')) ||
+            String(record1.lineId || '').localeCompare(String(record2.lineId || ''));
+    });
+
+    for (const record of sortedRecords) {
+        const normalized = normalizeLondonCorridorEndpoints(record.fromGroup, record.toGroup);
+        const endpointKey = `${normalized.fromGroup}|${normalized.toGroup}`;
+        const alignments = endpointLookup.get(endpointKey) || [];
+        let alignment = alignments.find(candidate =>
+            areLondonCorridorAlignmentsEquivalent(candidate.coordinates, record.coordinates, options)
+        );
+
+        if (!alignment) {
+            const sourceIdentity = record.sourceAlignmentId || `fallback-${alignments.length + 1}`;
+            alignment = {
+                alignmentId: `${sourceIdentity}:alignment-${alignments.length + 1}`,
+                coordinates: record.coordinates
+            };
+            alignments.push(alignment);
+            endpointLookup.set(endpointKey, alignments);
+        }
+
+        output.push({...record, alignmentId: alignment.alignmentId});
+    }
+
+    return output;
 }
 
 export function buildLondonDisplayFeatureCollection(records, options) {
