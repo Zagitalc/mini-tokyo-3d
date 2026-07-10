@@ -80,6 +80,31 @@ test('downstream evidence cannot move a dwelling train before 10 seconds', () =>
     assert.equal(allowed.sectionIndex, 5);
 });
 
+test('validated downstream departure resets station progress after minimum dwell', () => {
+    const previous = {
+        trainKey: 't', lineId: 'victoria', routeId: 'main', state: 'dwelling',
+        sectionIndex: 4, sectionProgress: 0.99, lastValidSectionIndex: 4, lastValidProgress: 0.99,
+        enteredStationAt: 0, lastObservationAt: 0, lastFreshEvidenceAt: 0,
+        lastProgressEvidenceAt: 0, lastSuccessfulPollAt: 0, missingSince: null,
+        missingAgeMs: 0, lastCoveragePollAt: 0, coverageWasComplete: true,
+        pendingRouteId: null, pendingRouteLeadCount: 0, stalePhase: 'none'
+    };
+    const observation = {
+        lineId: 'victoria', routeId: 'main', stationId: 'next', sectionIndex: 4,
+        sectionProgress: 0.08, atStation: false, validatedDeparture: true,
+        hasProgressionEvidence: true
+    };
+    const result = transitionTrainState(previous, observation, [], {
+        timestamp: 10000, success: true, observationsComplete: true,
+        trainKey: 't', identityConfidence: 1
+    });
+
+    assert.equal(result.state.state, 'moving');
+    assert.equal(result.state.sectionProgress, 0.08);
+    assert.equal(result.state.enteredStationAt, null);
+    assert.ok(!result.diagnostics.includes('backward-correction-clamped'));
+});
+
 test('a repeatedly stationary stale train expires from progression age', () => {
     const previous = {
         trainKey: 't', lineId: 'metropolitan', routeId: 'main', state: 'stale',

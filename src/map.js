@@ -26,9 +26,10 @@ import {
 } from './helpers/london-live-trains.mjs';
 import { matchObservationsToTrainStates } from './helpers/london-live-train-identity.mjs';
 import { normalizeTfLObservations } from './helpers/london-live-train-observations.mjs';
-import { deriveRendererCommand, transitionTrainState } from './helpers/london-live-train-state.mjs';
+import { deriveRendererCommand, DWELL_MIN_MS, transitionTrainState } from './helpers/london-live-train-state.mjs';
 import { getLondonStationAnchor } from './helpers/london-geometry.mjs';
 import { applyLondonStationGroups } from './helpers/london-stations.mjs';
+import { buildLondonTrainRouteFeature } from './helpers/london-train-route-geometry.mjs';
 import { GeoJsonLayer, ThreeLayer, Tile3DLayer, TrafficLayer } from './layers';
 import { loadBusData, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl } from './loader';
 import { AboutPanel, BusPanel, LayerPanel, SharePanel, StationPanel, TrainPanel } from './panels';
@@ -1017,6 +1018,25 @@ export default class extends Evented {
                     });
                 }
                 stationGroupLookup.get(group).stations.push(station);
+            }
+
+            const baseRouteLookup = new Map();
+            featureEach(me.featureCollection, feature => {
+                if (feature.properties && feature.properties.type === 0 && feature.properties.id) {
+                    baseRouteLookup.set(feature.properties.id, feature);
+                }
+            });
+            const displayFeatures = me.londonRailDisplayData &&
+                Array.isArray(me.londonRailDisplayData.features) ? me.londonRailDisplayData.features : [];
+            me._londonTrainRouteSources = new Map();
+            for (const railway of me.railways.getAll()) {
+                const baseFeature = baseRouteLookup.get(railway.id);
+                const result = buildLondonTrainRouteFeature({railway, displayFeatures, baseFeature});
+
+                if (!result) continue;
+                baseFeature.geometry = result.feature.geometry;
+                baseFeature.properties = result.feature.properties;
+                me._londonTrainRouteSources.set(railway.id, result.corridorSources);
             }
         }
 
@@ -3566,7 +3586,8 @@ export default class extends Evented {
             let progress = 0;
             let durationSec = null;
             const currentIndex = activeCurrentStation ? stationIndexLookup.get(activeCurrentStation.id) : undefined;
-            const isAtStation = locationType === 'at' && currentIndex !== undefined;
+            const previousState = t.previousState;
+            let isAtStation = locationType === 'at' && currentIndex !== undefined;
 
             prevStation = prevHintStation || null;
             nextStation = nextHintStation || null;
@@ -3597,6 +3618,16 @@ export default class extends Evented {
                 continue;
             }
             let nextIndex = next.stationIndex;
+            const validatedDeparture = isAtStation && previousState && previousState.state === 'dwelling' &&
+                pollTimestamp - previousState.enteredStationAt >= DWELL_MIN_MS &&
+                nextIndex !== currentIndex && Math.abs(nextIndex - currentIndex) === 1;
+
+            if (validatedDeparture) {
+                isAtStation = false;
+                prevStation = activeCurrentStation;
+                prevIndex = currentIndex;
+                nextStation = next.station;
+            }
             const hasLocationHint = !!prevStation || !!nextStation;
 
             if (isAtStation) {
@@ -3744,7 +3775,6 @@ export default class extends Evented {
             const prevEpoch = isFinite(nextEpoch) ? nextEpoch - duration : NaN;
             const accelTime = duration / 2;
             const accel = 4 / (duration * duration);
-            const previousState = t.previousState;
             const stateObservation = {
                 ...t.observation,
                 routeId: railway.id,
@@ -3757,7 +3787,9 @@ export default class extends Evented {
                 sectionIndex: prevIndex,
                 sectionProgress: progress,
                 atStation: isAtStation,
+                validatedDeparture,
                 hasProgressionEvidence: !isAtStation && !!previousState && (
+                    validatedDeparture ||
                     previousState.sectionIndex !== prevIndex ||
                     progress > (previousState.sectionProgress || 0) + 0.001
                 ),

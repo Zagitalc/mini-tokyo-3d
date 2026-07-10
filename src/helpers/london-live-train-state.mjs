@@ -115,7 +115,7 @@ function getPositionTransition(previousState, observation, routeSwitched) {
         };
     }
 
-    if (!Number.isFinite(previousIndex) || routeSwitched) {
+    if (!Number.isFinite(previousIndex) || routeSwitched || observation.validatedDeparture) {
         return {
             sectionIndex: requestedIndex,
             sectionProgress: Math.max(0, Math.min(1, requestedProgress)),
