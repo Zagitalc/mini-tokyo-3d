@@ -12,6 +12,10 @@ uniform sampler2D textureColor;
 
 attribute int instanceID;
 
+#ifdef LONDON_TUBE
+attribute float partRole;
+#endif
+
 #ifndef BUS
 attribute float groupIndex;
 #endif
@@ -70,9 +74,17 @@ reference = ivec2( ( colorID * 4 + 3 ) % width, ( colorID * 4 + 3 ) / width );
 vec3 color3 = texelFetch( textureColor, reference, 0 ).rgb;
 
 #ifdef CAR
+#ifdef LONDON_TUBE
+vInstanceColor = partRole < 0.5 ? vec3( 0.875, 0.890, 0.902 ) :
+    partRole < 1.5 ? vec3( 0.125, 0.157, 0.184 ) :
+    partRole < 2.5 ? color0 :
+    partRole < 3.5 ? vec3( 0.090, 0.106, 0.118 ) :
+    vec3( 0.816, 0.133, 0.176 );
+#else
 float mod3 = mod( groupIndex, 3.0 );
 vec3 null = vec3( 0.0, 1.0, 0.0 );
 vInstanceColor = groupIndex >= 3.0 && color3 != null ? color3 : mod3 == 0.0 ? color0 : mod3 == 1.0 ? color1 : color2;
+#endif
 #endif
 
 #ifdef AIRCRAFT

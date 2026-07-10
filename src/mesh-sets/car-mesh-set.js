@@ -1,6 +1,7 @@
 import {AdditiveBlending, BackSide, BoxGeometry, Mesh, MeshLambertMaterial, MultiplyBlending, ShaderMaterial, SphereGeometry} from 'three';
 import CarGeometry from './car-geometry.js';
 import InstancedGeometry from './instanced-geometry.js';
+import LondonTubeCarGeometry, {LONDON_TUBE_MARKER_PROFILE} from './london-tube-car-geometry.js';
 import MeshSet from './mesh-set.js';
 import {
     getCarGeometryArguments,
@@ -21,14 +22,23 @@ export default class extends MeshSet {
         super(parameters);
 
         const me = this,
-            dimensions = me.dimensions = resolveCarDimensions(parameters.dimensions),
+            isLondonTube = me.markerStyle = parameters.markerStyle === 'london-tube',
+            dimensions = me.dimensions = isLondonTube ? {
+                width: LONDON_TUBE_MARKER_PROFILE.width,
+                height: LONDON_TUBE_MARKER_PROFILE.totalLength,
+                depth: LONDON_TUBE_MARKER_PROFILE.height
+            } : resolveCarDimensions(parameters.dimensions),
             geometryArguments = getCarGeometryArguments(dimensions),
             scales = resolveCarModelScales(parameters);
 
         me.independentDelayMarkerScale = scales.independentDelayMarkerScale;
         me.delayMarkerModelScale = {value: scales.delayMarkerModelScale};
 
-        const carGeometry = new CarGeometry(...geometryArguments);
+        me.uniforms.outlinePadding = {
+            value: isLondonTube ? LONDON_TUBE_MARKER_PROFILE.outlinePadding : 0.1
+        };
+
+        const carGeometry = isLondonTube ? new LondonTubeCarGeometry() : new CarGeometry(...geometryArguments);
         const geometry = me.geometry = new InstancedGeometry(carGeometry, count);
 
         carGeometry.dispose();
@@ -47,7 +57,10 @@ export default class extends MeshSet {
             Object.assign(shader.uniforms, me.getUniforms());
             shader.vertexShader = updateVertexShader(shader.vertexShader);
             shader.fragmentShader = updateFragmentShader(shader.fragmentShader);
-            shader.defines = {CAR: true};
+            shader.defines = {
+                CAR: true,
+                ...(isLondonTube ? {LONDON_TUBE: true} : {})
+            };
         };
 
         const mesh = me.mesh = new Mesh(geometry, material);
@@ -92,7 +105,12 @@ export default class extends MeshSet {
         delayMarkerMesh.matrixAutoUpdate = false;
         delayMarkerMesh.frustumCulled = false;
 
-        const boxGeometry = new BoxGeometry(...geometryArguments);
+        const outlineArguments = isLondonTube ? [
+            LONDON_TUBE_MARKER_PROFILE.outlineWidth,
+            LONDON_TUBE_MARKER_PROFILE.outlineLength,
+            LONDON_TUBE_MARKER_PROFILE.outlineHeight
+        ] : geometryArguments;
+        const boxGeometry = new BoxGeometry(...outlineArguments);
         const outlineGeometry = me.outlineGeometry = new InstancedGeometry(boxGeometry, 2);
 
         boxGeometry.dispose();

@@ -89,6 +89,7 @@ export default class {
         if (me.isLondon) {
             carParameters.dimensions = LONDON_TRAIN_DIMENSIONS;
             carParameters.delayMarkerModelScale = modelScale;
+            carParameters.markerStyle = 'london-tube';
         }
 
         me.computeRenderer = new ComputeRenderer(MAX_UG_CARS + MAX_OG_CARS + MAX_AIRCRAFTS + MAX_BUSES, { modelOrigin, chunkSize });
