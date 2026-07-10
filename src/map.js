@@ -995,6 +995,7 @@ export default class extends Evented {
 
         me.dict = data.dict;
         me.featureCollection = data.featureCollection;
+        me.londonRailDisplayData = data.londonRailDisplayData;
 
         me.stations = new Dataset(Station);
         me.railDirections = new Dataset(RailDirection, data.railDirectionData);
