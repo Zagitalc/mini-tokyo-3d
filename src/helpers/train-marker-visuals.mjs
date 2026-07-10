@@ -47,6 +47,16 @@ export function getCarGeometryArguments(dimensions) {
     return [width, height, depth];
 }
 
+export function resolveCarModelScales({modelScale, delayMarkerModelScale}) {
+    const independentDelayMarkerScale = delayMarkerModelScale !== undefined;
+
+    return {
+        modelScale,
+        delayMarkerModelScale: independentDelayMarkerScale ? delayMarkerModelScale : modelScale,
+        independentDelayMarkerScale
+    };
+}
+
 export function getZoomProfileValue(zoom, profile) {
     if (!profile.length) return 1;
     if (zoom <= profile[0][0]) return profile[0][1];

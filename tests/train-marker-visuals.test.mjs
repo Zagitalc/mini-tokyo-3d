@@ -8,6 +8,7 @@ import {
     LONDON_TRAIN_DIMENSIONS,
     LONDON_TRAIN_SCALE_PROFILE,
     resolveCarDimensions,
+    resolveCarModelScales,
     TRAIN_MARKER_AXES
 } from '../src/helpers/train-marker-visuals.mjs';
 
@@ -38,6 +39,19 @@ test('invalid dimension overrides fall back per axis without changing valid axes
         width: 0.4,
         height: 1.76,
         depth: 0.88
+    });
+});
+
+test('delay-marker scale follows car scale by default and can be independent', () => {
+    assert.deepEqual(resolveCarModelScales({modelScale: 2}), {
+        modelScale: 2,
+        delayMarkerModelScale: 2,
+        independentDelayMarkerScale: false
+    });
+    assert.deepEqual(resolveCarModelScales({modelScale: 2, delayMarkerModelScale: 5}), {
+        modelScale: 2,
+        delayMarkerModelScale: 5,
+        independentDelayMarkerScale: true
     });
 });
 

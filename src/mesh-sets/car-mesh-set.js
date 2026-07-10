@@ -2,6 +2,11 @@ import {AdditiveBlending, BackSide, BoxGeometry, Mesh, MeshLambertMaterial, Mult
 import CarGeometry from './car-geometry.js';
 import InstancedGeometry from './instanced-geometry.js';
 import MeshSet from './mesh-set.js';
+import {
+    getCarGeometryArguments,
+    resolveCarDimensions,
+    resolveCarModelScales
+} from '../helpers/train-marker-visuals.mjs';
 import {updateVertexShader, updateFragmentShader} from './shaders.js';
 import delayMarkerFragmentShader from './delay-marker-fragment.glsl';
 import delayMarkerVertexShader from './delay-marker-vertex.glsl';
@@ -15,9 +20,15 @@ export default class extends MeshSet {
     constructor(count, parameters) {
         super(parameters);
 
-        const me = this;
+        const me = this,
+            dimensions = me.dimensions = resolveCarDimensions(parameters.dimensions),
+            geometryArguments = getCarGeometryArguments(dimensions),
+            scales = resolveCarModelScales(parameters);
 
-        const carGeometry = new CarGeometry(.88, 1.76, .88);
+        me.independentDelayMarkerScale = scales.independentDelayMarkerScale;
+        me.delayMarkerModelScale = {value: scales.delayMarkerModelScale};
+
+        const carGeometry = new CarGeometry(...geometryArguments);
         const geometry = me.geometry = new InstancedGeometry(carGeometry, count);
 
         carGeometry.dispose();
@@ -66,6 +77,7 @@ export default class extends MeshSet {
         const delayMarkerMaterial = me.delayMarkerMaterial = new ShaderMaterial({
             uniforms: {
                 ...me.getUniforms(),
+                modelScale: me.delayMarkerModelScale,
                 base: {value: 1}
             },
             vertexShader: delayMarkerVertexShader,
@@ -80,7 +92,7 @@ export default class extends MeshSet {
         delayMarkerMesh.matrixAutoUpdate = false;
         delayMarkerMesh.frustumCulled = false;
 
-        const boxGeometry = new BoxGeometry(.88, 1.76, .88);
+        const boxGeometry = new BoxGeometry(...geometryArguments);
         const outlineGeometry = me.outlineGeometry = new InstancedGeometry(boxGeometry, 2);
 
         boxGeometry.dispose();
@@ -104,6 +116,17 @@ export default class extends MeshSet {
         outlineMesh.updateMatrix();
         outlineMesh.matrixAutoUpdate = false;
         outlineMesh.frustumCulled = false;
+    }
+
+    refreshCameraParams(params) {
+        const me = this;
+
+        super.refreshCameraParams(params);
+        if (params.delayMarkerModelScale !== undefined) {
+            me.delayMarkerModelScale.value = params.delayMarkerModelScale;
+        } else if (!me.independentDelayMarkerScale && params.modelScale !== undefined) {
+            me.delayMarkerModelScale.value = params.modelScale;
+        }
     }
 
     setTextures(textures) {
