@@ -3,6 +3,7 @@ import configs from '../configs';
 import ComputeRenderer from '../gpgpu/compute-renderer';
 import { lerp } from '../helpers/helpers';
 import { hasDarkBackground } from '../helpers/helpers-mapbox';
+import { transactionalRebindLondonTrain } from '../helpers/london-live-train-rebind.mjs';
 import { AircraftMeshSet, BusMeshSet, CarMeshSet } from '../mesh-sets';
 import { Point, MercatorCoordinate } from 'mapbox-gl';
 import { Color, Scene, WebGLRenderTarget, Vector3 } from 'three';
@@ -298,6 +299,35 @@ export default class {
         me.computeRenderer.updateInstance(object.instanceID, sectionIndex, nextSectionIndex, timeOffset, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration);
         Object.assign(object, me.getObjectPosition(object));
         me.needsUpdateInstances = true;
+    }
+
+    rebindObjectRoute(object, { routeId, railway, sectionIndex, sectionLength, progress }) {
+        const me = this;
+
+        transactionalRebindLondonTrain({
+            train: object,
+            routeId,
+            railway,
+            sectionIndex,
+            sectionLength,
+            progress,
+            resolveBinding: (nextRouteId, nextRailway) => ({
+                routeIndex: me.computeRenderer.getRouteIndex(nextRouteId),
+                colorIndex: me.computeRenderer.getColorIndex(
+                    object.v ? object.v.id : nextRailway ? nextRailway.id : nextRouteId
+                )
+            }),
+            applyBinding: binding => me.computeRenderer.rebindInstance(
+                binding.instanceID,
+                binding.routeIndex,
+                binding.colorIndex,
+                binding.sectionIndex,
+                binding.nextSectionIndex,
+                binding.progress
+            )
+        });
+        me.needsUpdateInstances = true;
+        return object;
     }
 
     getObjectPosition(object) {

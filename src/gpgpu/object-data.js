@@ -71,6 +71,44 @@ export default class {
         floatTexture.needsUpdate = true;
     }
 
+    rebind(instanceID, routeIndex, colorIndex, sectionIndex, nextSectionIndex, timeOffset, progress) {
+        const me = this,
+            {uintTexture, floatTexture} = me,
+            uintArray = uintTexture.image.data,
+            floatArray = floatTexture.image.data,
+            offset = instanceID * 8;
+
+        if (!Number.isInteger(instanceID) || instanceID < 0 || instanceID >= me.count ||
+            uintArray[offset + 6] === 0 || !Number.isFinite(routeIndex) ||
+            !Number.isFinite(colorIndex) || !Number.isFinite(sectionIndex) ||
+            !Number.isFinite(nextSectionIndex)) {
+            throw new Error('Invalid renderer route rebind');
+        }
+
+        const oldRouteIndex = uintArray[offset + 1],
+            oldColorIndex = uintArray[offset + 2],
+            oldStartTime = uintArray[offset + 3],
+            oldEndTime = uintArray[offset + 4],
+            oldSectionIndex = floatArray[offset],
+            oldNextSectionIndex = floatArray[offset + 1],
+            duration = Math.max(1, oldEndTime - oldStartTime),
+            nextProgress = Math.max(0, Math.min(0.99, progress || 0)),
+            startTime = Number.isFinite(timeOffset) ? timeOffset - duration * nextProgress : oldStartTime;
+
+        try {
+            uintArray.set([routeIndex, colorIndex, startTime, startTime + duration], offset + 1);
+            floatArray.set([sectionIndex, nextSectionIndex], offset);
+            uintTexture.needsUpdate = true;
+            floatTexture.needsUpdate = true;
+        } catch (error) {
+            uintArray.set([oldRouteIndex, oldColorIndex, oldStartTime, oldEndTime], offset + 1);
+            floatArray.set([oldSectionIndex, oldNextSectionIndex], offset);
+            uintTexture.needsUpdate = true;
+            floatTexture.needsUpdate = true;
+            throw error;
+        }
+    }
+
     remove(instanceID) {
         return new Promise(resolve => {
             const me = this,
