@@ -19,6 +19,21 @@ test('normalization groups TfL predictions by authoritative vehicle ID', () => {
     assert.deepEqual(observations[0].predictions.map(value => value.stationId), ['A', 'B']);
 });
 
+test('normalization partitions anonymous predictions when stations contain multiple trains', () => {
+    const observations = normalizeTfLObservations([
+        {lineId: 'central', direction: 'eastbound', destinationName: 'Epping', naptanId: 'A', timeToStation: 20},
+        {lineId: 'central', direction: 'eastbound', destinationName: 'Epping', naptanId: 'A', timeToStation: 80},
+        {lineId: 'central', direction: 'eastbound', destinationName: 'Epping', naptanId: 'B', timeToStation: 60},
+        {lineId: 'central', direction: 'eastbound', destinationName: 'Epping', naptanId: 'B', timeToStation: 120}
+    ], {timestamp: 1000});
+
+    assert.equal(observations.length, 2);
+    assert.deepEqual(observations.map(value => value.predictions.map(prediction => prediction.timeToStation)), [
+        [20, 60],
+        [80, 120]
+    ]);
+});
+
 test('synthetic IDs are session-local and monotonic', () => {
     assert.equal(createLondonSyntheticTrainId('abc', 7), 'london-synthetic-abc-7');
     assert.equal(createLondonSyntheticTrainId('abc', 8), 'london-synthetic-abc-8');

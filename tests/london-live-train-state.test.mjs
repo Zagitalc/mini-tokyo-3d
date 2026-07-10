@@ -56,6 +56,48 @@ test('dwell is edge-triggered and has exact 10s and 45s boundaries', async () =>
     assert.equal(third.stalePhase, 'freeze');
 });
 
+test('downstream evidence cannot move a dwelling train before 10 seconds', () => {
+    const previous = {
+        trainKey: 't', lineId: 'victoria', routeId: 'main', state: 'dwelling',
+        sectionIndex: 4, sectionProgress: 0.99, lastValidSectionIndex: 4, lastValidProgress: 0.99,
+        enteredStationAt: 0, lastObservationAt: 0, lastFreshEvidenceAt: 0,
+        lastProgressEvidenceAt: 0, missingSince: null, missingAgeMs: 0,
+        lastCoveragePollAt: 0, coverageWasComplete: true, stalePhase: 'none',
+        pendingRouteId: null, pendingRouteLeadCount: 0
+    };
+    const early = transitionTrainState(previous, {
+        lineId: 'victoria', routeId: 'main', sectionIndex: 5,
+        sectionProgress: 0.1, atStation: false, hasProgressionEvidence: true
+    }, [], {timestamp: 9999, identityConfidence: 1}).state;
+    const allowed = transitionTrainState(previous, {
+        lineId: 'victoria', routeId: 'main', sectionIndex: 5,
+        sectionProgress: 0.1, atStation: false, hasProgressionEvidence: true
+    }, [], {timestamp: 10000, identityConfidence: 1}).state;
+
+    assert.equal(early.state, 'dwelling');
+    assert.equal(early.sectionIndex, 4);
+    assert.equal(allowed.state, 'moving');
+    assert.equal(allowed.sectionIndex, 5);
+});
+
+test('a repeatedly stationary stale train expires from progression age', () => {
+    const previous = {
+        trainKey: 't', lineId: 'metropolitan', routeId: 'main', state: 'stale',
+        sectionIndex: 7, sectionProgress: 0.99, lastValidSectionIndex: 7, lastValidProgress: 0.99,
+        enteredStationAt: 0, lastObservationAt: 45000, lastFreshEvidenceAt: 0,
+        lastProgressEvidenceAt: 0, missingSince: null, missingAgeMs: 0,
+        lastCoveragePollAt: 45000, coverageWasComplete: true, stalePhase: 'freeze',
+        pendingRouteId: null, pendingRouteLeadCount: 0
+    };
+    const result = transitionTrainState(previous, {
+        lineId: 'metropolitan', routeId: 'main', sectionIndex: 7,
+        sectionProgress: 0.99, atStation: true
+    }, [], {timestamp: 90000, identityConfidence: 1});
+
+    assert.equal(result.state.state, 'expired');
+    assert.equal(result.state.stalePhase, 'remove');
+});
+
 test('route switching requires score margin, confirmation, and a boundary', async () => {
     const result = await replay('branch-switch');
     const states = result.frames.map(frame => frame.states.get('northern|N1'));

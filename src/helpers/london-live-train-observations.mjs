@@ -37,7 +37,7 @@ function normalizeRecord(raw, {lineId, timestamp}) {
     return {
         raw,
         vehicleId: cleanString(raw.vehicleId),
-        lineId: cleanString(raw.lineId || lineId).toLowerCase(),
+        lineId: cleanString(lineId || raw.lineId).toLowerCase(),
         direction: normalizeDirection(raw.direction),
         destination: cleanString(raw.destination || raw.destinationName),
         platform: cleanString(raw.platform || raw.platformName),
@@ -82,13 +82,29 @@ export function normalizeTfLObservations(raw, context = {}) {
         .map(value => normalizeRecord(value, {...context, timestamp}))
         .filter(value => value.lineId && (value.timeToStation !== undefined || value.sectionIndex !== undefined));
     const vehicleGroups = new Map();
+    const anonymousGroups = new Map();
     const observations = [];
 
     for (let index = 0; index < records.length; index++) {
         const record = records[index];
 
         if (!record.vehicleId) {
-            observations.push(aggregateRecords([record], `${record.lineId}|anonymous|${index}`));
+            const key = [
+                record.lineId,
+                record.direction,
+                record.destination,
+                record.platform,
+                record.currentLocation,
+                cleanString(record.raw.towards),
+                cleanString(record.raw.destinationNaptanId)
+            ].join('|');
+            const group = anonymousGroups.get(key);
+
+            if (group) {
+                group.push(record);
+            } else {
+                anonymousGroups.set(key, [record]);
+            }
             continue;
         }
 
@@ -104,6 +120,33 @@ export function normalizeTfLObservations(raw, context = {}) {
 
     for (const [key, recordsForVehicle] of vehicleGroups) {
         observations.push(aggregateRecords(recordsForVehicle, key));
+    }
+    for (const [key, anonymousRecords] of anonymousGroups) {
+        const recordsByStation = new Map();
+
+        for (const record of anonymousRecords) {
+            const stationKey = record.stationId || record.stationName || 'unknown';
+            const stationRecords = recordsByStation.get(stationKey);
+
+            if (stationRecords) {
+                stationRecords.push(record);
+            } else {
+                recordsByStation.set(stationKey, [record]);
+            }
+        }
+
+        const runCount = Math.max(...[...recordsByStation.values()].map(values => values.length));
+        const runs = Array.from({length: runCount}, () => []);
+
+        for (const stationRecords of recordsByStation.values()) {
+            stationRecords.sort((a, b) =>
+                finiteNumber(a.timeToStation) - finiteNumber(b.timeToStation)
+            );
+            stationRecords.forEach((record, index) => runs[index].push(record));
+        }
+        runs.forEach((run, index) => {
+            observations.push(aggregateRecords(run, `${key}|anonymous-run-${index}`));
+        });
     }
 
     return observations.sort((a, b) => a.observationId.localeCompare(b.observationId));

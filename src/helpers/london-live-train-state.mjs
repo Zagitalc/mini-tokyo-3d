@@ -276,21 +276,24 @@ export function transitionTrainState(previousState, observation, routeCandidates
     }
 
     const route = getRouteTransition(previousState, observation, routeCandidates);
-    const position = getPositionTransition(previousState, observation, route.switched);
-    const materiallyNew = isMateriallyNew(previousState, observation);
-    const progressionObserved = hasProgressionEvidence(previousState, observation);
+    const placementObservation = !route.switched && route.routeId !== observation.routeId &&
+        observation.currentRouteObservation ? observation.currentRouteObservation : observation;
+    const position = getPositionTransition(previousState, placementObservation, route.switched);
+    const materiallyNew = isMateriallyNew(previousState, placementObservation);
+    const progressionObserved = hasProgressionEvidence(previousState, placementObservation);
     const progressionAccepted = progressionObserved && position.diagnosticCode !== 'jump-multiple-sections';
     const diagnostics = [route.diagnosticCode, position.diagnosticCode].filter(Boolean);
-    const isArrival = observation.atStation ||
+    const isArrival = placementObservation.atStation ||
         (position.sectionProgress >= 0.99 && finiteOr(previousState.sectionProgress, 0) < 0.99);
     let state = previousState.state === 'expired' ? 'unplaced' : previousState.state;
     let enteredStationAt = previousState.enteredStationAt;
     let stalePhase = 'none';
+    let acceptPosition = true;
 
     if (previousState.state === 'dwelling') {
         const dwellElapsed = timestamp - previousState.enteredStationAt;
 
-        if (dwellElapsed >= DWELL_MIN_MS && progressionAccepted && !observation.atStation) {
+        if (dwellElapsed >= DWELL_MIN_MS && progressionAccepted && !placementObservation.atStation) {
             state = 'moving';
             enteredStationAt = null;
         } else if (dwellElapsed >= DWELL_MAX_MS && !progressionAccepted) {
@@ -299,10 +302,19 @@ export function transitionTrainState(previousState, observation, routeCandidates
             diagnostics.push('dwell-max-exceeded');
         } else {
             state = 'dwelling';
+            acceptPosition = !progressionAccepted || dwellElapsed >= DWELL_MIN_MS;
         }
     } else if (previousState.state === 'stale' && !progressionAccepted) {
-        state = 'stale';
-        stalePhase = previousState.stalePhase === 'remove' ? 'freeze' : previousState.stalePhase;
+        const progressAge = timestamp - finiteOr(previousState.lastProgressEvidenceAt, timestamp);
+
+        if (progressAge >= STALE_FREEZE_MS) {
+            state = 'expired';
+            stalePhase = 'remove';
+            diagnostics.push('stale-expired');
+        } else {
+            state = 'stale';
+            stalePhase = previousState.stalePhase === 'remove' ? 'freeze' : previousState.stalePhase;
+        }
     } else if (isArrival) {
         state = 'dwelling';
         enteredStationAt = timestamp;
@@ -313,35 +325,38 @@ export function transitionTrainState(previousState, observation, routeCandidates
         state = 'unplaced';
     }
 
-    const validPosition = position.diagnosticCode !== 'jump-multiple-sections';
+    const validPosition = position.diagnosticCode !== 'jump-multiple-sections' && acceptPosition;
+    const sectionIndex = acceptPosition ? position.sectionIndex : previousState.sectionIndex;
+    const sectionProgress = acceptPosition ? position.sectionProgress : previousState.sectionProgress;
 
     return {
         state: {
             ...previousState,
             vehicleId: observation.vehicleId || previousState.vehicleId,
             identityConfidence: pollMeta.identityConfidence,
-            direction: observation.direction || previousState.direction,
-            destination: observation.destination || previousState.destination,
-            platform: observation.platform || previousState.platform,
-            stationId: observation.stationId || previousState.stationId,
+            direction: placementObservation.direction || previousState.direction,
+            destination: placementObservation.destination || previousState.destination,
+            platform: placementObservation.platform || previousState.platform,
+            stationId: placementObservation.stationId || previousState.stationId,
             routeId: route.routeId,
             pendingRouteId: route.pendingRouteId,
             pendingRouteLeadCount: route.pendingRouteLeadCount,
             state,
-            sectionIndex: position.sectionIndex,
-            sectionProgress: position.sectionProgress,
-            lastValidSectionIndex: validPosition ? position.sectionIndex : previousState.lastValidSectionIndex,
-            lastValidProgress: validPosition ? position.sectionProgress : previousState.lastValidProgress,
+            sectionIndex,
+            sectionProgress,
+            lastValidSectionIndex: validPosition ? sectionIndex : previousState.lastValidSectionIndex,
+            lastValidProgress: validPosition ? sectionProgress : previousState.lastValidProgress,
             enteredStationAt,
             lastObservationAt: timestamp,
             lastFreshEvidenceAt: materiallyNew ? timestamp : previousState.lastFreshEvidenceAt,
-            lastProgressEvidenceAt: progressionAccepted ? timestamp : previousState.lastProgressEvidenceAt,
+            lastProgressEvidenceAt: progressionAccepted && acceptPosition ?
+                timestamp : previousState.lastProgressEvidenceAt,
             lastSuccessfulPollAt: timestamp,
             missingSince: null,
             missingAgeMs: 0,
             lastCoveragePollAt: timestamp,
             coverageWasComplete: true,
-            lastTimeToStation: observation.timeToStation,
+            lastTimeToStation: placementObservation.timeToStation,
             stalePhase
         },
         diagnostics
