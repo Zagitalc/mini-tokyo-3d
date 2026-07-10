@@ -1,6 +1,6 @@
 import fs from 'fs';
 import https from 'https';
-import zlib from 'zlib';
+import {gzipJSON} from '../helpers/deterministic-gzip.mjs';
 
 export function loadJSON(url) {
     return new Promise((resolve, reject) => {
@@ -29,11 +29,7 @@ export function loadJSON(url) {
 }
 
 export function saveJSON(path, data) {
-    zlib.gzip(JSON.stringify(data), {level: 9}, (error, data) => {
-        if (!error) {
-            fs.promises.writeFile(path, data);
-        }
-    });
+    return gzipJSON(data).then(result => fs.promises.writeFile(path, result));
 }
 
 export function readdir(path) {

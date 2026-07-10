@@ -1,0 +1,1 @@
+{"polls":[{"timestamp":0,"linePolls":[{"lineId":"central","success":true,"observationsComplete":true,"observations":[{"direction":"eastbound","destination":"Epping","routeId":"central-main","sectionIndex":10,"timeToStation":40},{"direction":"eastbound","destination":"Epping","routeId":"central-main","sectionIndex":10,"timeToStation":45}]}]}]}
