@@ -1,0 +1,297 @@
+import nearestPointOnLine from '@turf/nearest-point-on-line';
+import lineSliceAlong from '@turf/line-slice-along';
+import turfDistance from '@turf/distance';
+import turfLength from '@turf/length';
+import { lineString, point } from '@turf/helpers';
+
+const DEFAULT_MAX_STATION_DISTANCE_KM = 0.2;
+const DEFAULT_MAX_CORRIDOR_DETOUR_RATIO = 4;
+const DEFAULT_MAX_JOIN_DISTANCE_KM = 0.25;
+
+function isCoordinate(coord) {
+    return Array.isArray(coord) && coord.length >= 2 &&
+        Number.isFinite(coord[0]) && Number.isFinite(coord[1]);
+}
+
+function cleanLineCoordinates(coords) {
+    const cleaned = [];
+
+    for (const coord of coords || []) {
+        if (!isCoordinate(coord)) continue;
+        const normalized = [Number(coord[0]), Number(coord[1])];
+        const previous = cleaned[cleaned.length - 1];
+
+        if (!previous || previous[0] !== normalized[0] || previous[1] !== normalized[1]) {
+            cleaned.push(normalized);
+        }
+    }
+    return cleaned;
+}
+
+function endpointDistance(line1, atStart1, line2, atStart2) {
+    const coord1 = line1[atStart1 ? 0 : line1.length - 1];
+    const coord2 = line2[atStart2 ? 0 : line2.length - 1];
+
+    return turfDistance(point(coord1), point(coord2));
+}
+
+export function stitchOsmRelationParts(parts, maxJoinDistanceKm = DEFAULT_MAX_JOIN_DISTANCE_KM) {
+    const remaining = (parts || [])
+        .map(cleanLineCoordinates)
+        .filter(coords => coords.length >= 2);
+
+    if (!remaining.length) return [];
+
+    let stitched = remaining.shift().slice();
+
+    while (remaining.length) {
+        let best = null;
+
+        for (let index = 0; index < remaining.length; index++) {
+            const candidate = remaining[index];
+            const joins = [
+                { distance: endpointDistance(stitched, false, candidate, true), prepend: false, reverse: false },
+                { distance: endpointDistance(stitched, false, candidate, false), prepend: false, reverse: true },
+                { distance: endpointDistance(stitched, true, candidate, false), prepend: true, reverse: false },
+                { distance: endpointDistance(stitched, true, candidate, true), prepend: true, reverse: true }
+            ];
+
+            for (const join of joins) {
+                if (!best || join.distance < best.distance) {
+                    best = { ...join, index };
+                }
+            }
+        }
+
+        if (!best || best.distance > maxJoinDistanceKm) break;
+
+        let next = remaining.splice(best.index, 1)[0];
+        if (best.reverse) next = next.slice().reverse();
+
+        if (best.prepend) {
+            stitched = next.slice(0, -1).concat(stitched);
+        } else {
+            stitched = stitched.concat(next.slice(1));
+        }
+    }
+
+    return stitched;
+}
+
+function getRelationIdentity(feature, index) {
+    const properties = feature && feature.properties || {};
+    const rawId = properties['@id'] || properties.id || properties.osm_id || `feature-${index}`;
+    return String(rawId).replace(/^relation\//, 'osm-relation-');
+}
+
+export function collectOsmRelationCandidates(geojson) {
+    const candidates = [];
+
+    for (const [index, feature] of (geojson && geojson.features || []).entries()) {
+        const geometry = feature && feature.geometry;
+        const properties = feature && feature.properties || {};
+
+        if (!geometry || properties.route !== 'subway') continue;
+
+        const parts = geometry.type === 'LineString'
+            ? [geometry.coordinates]
+            : geometry.type === 'MultiLineString' ? geometry.coordinates : [];
+        const coordinates = stitchOsmRelationParts(parts);
+
+        if (coordinates.length < 2) continue;
+
+        const relationId = getRelationIdentity(feature, index);
+        candidates.push({
+            relationId,
+            alignmentId: `${relationId}:path-1`,
+            coordinates,
+            properties
+        });
+    }
+
+    return candidates;
+}
+
+function projectStationCoordinates(line, stationCoords) {
+    return stationCoords.map(coord => {
+        const nearest = nearestPointOnLine(line, point(coord));
+        return {
+            offset: nearest.properties.location,
+            distance: nearest.properties.dist
+        };
+    });
+}
+
+function countInversions(offsets) {
+    let inversions = 0;
+
+    for (let index = 1; index < offsets.length; index++) {
+        if (offsets[index] + 1e-6 < offsets[index - 1]) inversions++;
+    }
+    return inversions;
+}
+
+export function projectStationsMonotonically(coordinates, stationCoords, {
+    maxStationDistanceKm = DEFAULT_MAX_STATION_DISTANCE_KM
+} = {}) {
+    const cleanCoordinates = cleanLineCoordinates(coordinates);
+    const cleanStations = (stationCoords || []).filter(isCoordinate);
+
+    if (cleanCoordinates.length < 2 || cleanStations.length < 2) {
+        return { valid: false, reason: 'insufficient-coordinates' };
+    }
+
+    const forwardLine = lineString(cleanCoordinates);
+    const forwardProjection = projectStationCoordinates(forwardLine, cleanStations);
+    const reverseCoordinates = cleanCoordinates.slice().reverse();
+    const reverseProjection = projectStationCoordinates(lineString(reverseCoordinates), cleanStations);
+    const forwardInversions = countInversions(forwardProjection.map(value => value.offset));
+    const reverseInversions = countInversions(reverseProjection.map(value => value.offset));
+    const useReverse = reverseInversions < forwardInversions;
+    const projection = useReverse ? reverseProjection : forwardProjection;
+    const orientedCoordinates = useReverse ? reverseCoordinates : cleanCoordinates;
+    const maxDistance = Math.max(...projection.map(value => value.distance));
+    const inversions = Math.min(forwardInversions, reverseInversions);
+
+    return {
+        valid: inversions === 0 && maxDistance <= maxStationDistanceKm,
+        reason: inversions ? 'non-monotonic-stations' :
+            maxDistance > maxStationDistanceKm ? 'station-too-far-from-path' : null,
+        coordinates: orientedCoordinates,
+        stationOffsets: projection.map(value => value.offset),
+        stationDistances: projection.map(value => value.distance),
+        inversions,
+        reversed: useReverse,
+        score: inversions * 1000 + projection.reduce((sum, value) => sum + value.distance, 0)
+    };
+}
+
+export function matchOsmRelationCandidate(candidates, stationCoords, options) {
+    let best = null;
+
+    for (const candidate of candidates || []) {
+        const projection = projectStationsMonotonically(candidate.coordinates, stationCoords, options);
+
+        if (!projection.valid) continue;
+        if (!best || projection.score < best.projection.score) {
+            best = { candidate, projection };
+        }
+    }
+
+    return best;
+}
+
+export function validateLondonCorridorGeometry(coordinates, startCoord, endCoord, {
+    maxEndpointDistanceKm = DEFAULT_MAX_STATION_DISTANCE_KM,
+    maxDetourRatio = DEFAULT_MAX_CORRIDOR_DETOUR_RATIO
+} = {}) {
+    const cleanCoordinates = cleanLineCoordinates(coordinates);
+
+    if (cleanCoordinates.length < 2 || !isCoordinate(startCoord) || !isCoordinate(endCoord)) {
+        return { valid: false, reason: 'insufficient-coordinates' };
+    }
+
+    const startDistance = turfDistance(point(startCoord), point(cleanCoordinates[0]));
+    const endDistance = turfDistance(point(endCoord), point(cleanCoordinates[cleanCoordinates.length - 1]));
+
+    if (startDistance > maxEndpointDistanceKm || endDistance > maxEndpointDistanceKm) {
+        return { valid: false, reason: 'endpoint-too-far' };
+    }
+
+    const directLength = Math.max(turfDistance(point(startCoord), point(endCoord)), 0.001);
+    const pathLength = turfLength(lineString(cleanCoordinates));
+
+    if (!Number.isFinite(pathLength) || pathLength > directLength * maxDetourRatio + 0.5) {
+        return { valid: false, reason: 'excessive-detour' };
+    }
+
+    return { valid: true, coordinates: cleanCoordinates, pathLength, directLength };
+}
+
+function clampVector(origin, target, maxLength) {
+    const dx = target[0] - origin[0];
+    const dy = target[1] - origin[1];
+    const length = Math.hypot(dx, dy);
+
+    if (!length || length <= maxLength) return target;
+    const factor = maxLength / length;
+    return [origin[0] + dx * factor, origin[1] + dy * factor];
+}
+
+function cubicBezier(start, control1, control2, end, t) {
+    const mt = 1 - t;
+    return [
+        mt * mt * mt * start[0] + 3 * mt * mt * t * control1[0] +
+            3 * mt * t * t * control2[0] + t * t * t * end[0],
+        mt * mt * mt * start[1] + 3 * mt * mt * t * control1[1] +
+            3 * mt * t * t * control2[1] + t * t * t * end[1]
+    ];
+}
+
+export function buildTangentClampedFallback(previousCoord, startCoord, endCoord, nextCoord) {
+    const previous = isCoordinate(previousCoord) ? previousCoord : startCoord;
+    const next = isCoordinate(nextCoord) ? nextCoord : endCoord;
+    const directKm = turfDistance(point(startCoord), point(endCoord));
+    const directDegrees = Math.hypot(endCoord[0] - startCoord[0], endCoord[1] - startCoord[1]);
+    const maxControlLength = directDegrees / 3;
+    const rawControl1 = [
+        startCoord[0] + (endCoord[0] - previous[0]) / 6,
+        startCoord[1] + (endCoord[1] - previous[1]) / 6
+    ];
+    const rawControl2 = [
+        endCoord[0] - (next[0] - startCoord[0]) / 6,
+        endCoord[1] - (next[1] - startCoord[1]) / 6
+    ];
+    const control1 = clampVector(startCoord, rawControl1, maxControlLength);
+    const control2 = clampVector(endCoord, rawControl2, maxControlLength);
+    const subdivisions = Math.max(4, Math.ceil(directKm / 0.25));
+    const coordinates = [];
+
+    for (let index = 0; index <= subdivisions; index++) {
+        coordinates.push(cubicBezier(startCoord, control1, control2, endCoord, index / subdivisions));
+    }
+
+    return coordinates;
+}
+
+export function extractLondonRelationCorridors(match, stationCoords, options = {}) {
+    if (!match || !match.projection || !match.candidate) return [];
+
+    const { projection, candidate } = match;
+    const line = lineString(projection.coordinates);
+    const corridors = [];
+
+    for (let index = 0; index < stationCoords.length - 1; index++) {
+        const startCoord = stationCoords[index];
+        const endCoord = stationCoords[index + 1];
+        const startOffset = projection.stationOffsets[index];
+        const endOffset = projection.stationOffsets[index + 1];
+        let coordinates = [];
+
+        if (Number.isFinite(startOffset) && Number.isFinite(endOffset) && endOffset > startOffset + 1e-6) {
+            coordinates = lineSliceAlong(line, startOffset, endOffset).geometry.coordinates;
+            coordinates[0] = startCoord.slice(0, 2);
+            coordinates[coordinates.length - 1] = endCoord.slice(0, 2);
+        }
+
+        const validation = validateLondonCorridorGeometry(coordinates, startCoord, endCoord, options);
+        const useFallback = !validation.valid;
+
+        corridors.push({
+            index,
+            alignmentId: candidate.alignmentId,
+            geometrySource: useFallback ? 'fallback' : 'osm',
+            validationReason: useFallback ? validation.reason : null,
+            coordinates: useFallback
+                ? buildTangentClampedFallback(
+                    stationCoords[index - 1],
+                    startCoord,
+                    endCoord,
+                    stationCoords[index + 2]
+                )
+                : validation.coordinates
+        });
+    }
+
+    return corridors;
+}
