@@ -61,6 +61,7 @@
     "rollup": "^4.32.0",
     "rollup-plugin-postcss": "^4.0.2",
     "rollup-plugin-visualizer": "^5.14.0",
+    "serve": "^14.2.6",
     "vuepress": "^1.9.10",
     "vuepress-plugin-flexsearch": "^0.3.0"
   },
@@ -73,7 +74,7 @@
     "build-data:london-gtfs": "node scripts/build-london-gtfs-geometry.js",
     "build-data:london-tfl-victoria": "node scripts/tfl_victoria_geometry_to_data_london.mjs",
     "build-data:london-osm-victoria": "node scripts/build-london-osm-victoria-geometry.mjs",
-    "serve": "npx serve build",
+    "serve": "serve build",
     "build:london": "run-s build build-pages build-data:london",
     "start:london": "run-s build:london serve",
     "test": "node --test tests/*.test.mjs",
