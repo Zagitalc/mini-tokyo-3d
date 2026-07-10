@@ -4,6 +4,10 @@ import ComputeRenderer from '../gpgpu/compute-renderer';
 import { lerp } from '../helpers/helpers';
 import { hasDarkBackground } from '../helpers/helpers-mapbox';
 import { transactionalRebindLondonTrain } from '../helpers/london-live-train-rebind.mjs';
+import {
+    getLondonTrainScaleFactor,
+    LONDON_TRAIN_DIMENSIONS
+} from '../helpers/train-marker-visuals.mjs';
 import { AircraftMeshSet, BusMeshSet, CarMeshSet } from '../mesh-sets';
 import { Point, MercatorCoordinate } from 'mapbox-gl';
 import { Color, Scene, WebGLRenderTarget, Vector3 } from 'three';
@@ -75,12 +79,22 @@ export default class {
         me.getModelScaleForZoom = me.isLondon ?
             zoomLevel => me.baseModelScale * getZoomProfileValue(zoomLevel, LONDON_MODEL_SCALE_PROFILE) :
             () => me.baseModelScale;
-        const modelScale = me.getModelScaleForZoom(zoom);
+        me.getTrainModelScaleForZoom = me.isLondon ?
+            zoomLevel => me.baseModelScale * getLondonTrainScaleFactor(zoomLevel) :
+            () => me.baseModelScale;
+        const modelScale = me.getModelScaleForZoom(zoom),
+            trainModelScale = me.getTrainModelScaleForZoom(zoom),
+            carParameters = { zoom, cameraZ, modelScale: trainModelScale };
+
+        if (me.isLondon) {
+            carParameters.dimensions = LONDON_TRAIN_DIMENSIONS;
+            carParameters.delayMarkerModelScale = modelScale;
+        }
 
         me.computeRenderer = new ComputeRenderer(MAX_UG_CARS + MAX_OG_CARS + MAX_AIRCRAFTS + MAX_BUSES, { modelOrigin, chunkSize });
 
-        const ugCarMeshSet = me.ugCarMeshSet = new CarMeshSet(MAX_UG_CARS, { zoom, cameraZ, modelScale }),
-            ogCarMeshSet = me.ogCarMeshSet = new CarMeshSet(MAX_OG_CARS, { zoom, cameraZ, modelScale }),
+        const ugCarMeshSet = me.ugCarMeshSet = new CarMeshSet(MAX_UG_CARS, carParameters),
+            ogCarMeshSet = me.ogCarMeshSet = new CarMeshSet(MAX_OG_CARS, carParameters),
             aircraftMeshSet = me.aircraftMeshSet = new AircraftMeshSet(MAX_AIRCRAFTS, { zoom, cameraZ, modelScale }),
             busMeshSet = me.busMeshSet = new BusMeshSet(MAX_BUSES, { zoom, cameraZ, modelScale });
 
@@ -179,16 +193,26 @@ export default class {
     onCameraChanged() {
         const me = this,
             map = me.map,
-            cameraParams = {
+            zoom = map.getZoom(),
+            modelScale = me.getModelScaleForZoom ? me.getModelScaleForZoom(zoom) : undefined,
+            trainCameraParams = {
+                zoom,
+                cameraZ: map.map.getFreeCameraOptions().position.z,
+                modelScale: me.getTrainModelScaleForZoom ? me.getTrainModelScaleForZoom(zoom) : undefined
+            },
+            otherCameraParams = {
                 zoom: map.getZoom(),
                 cameraZ: map.map.getFreeCameraOptions().position.z,
-                modelScale: me.getModelScaleForZoom ? me.getModelScaleForZoom(map.getZoom()) : undefined
+                modelScale
             };
 
-        me.ugCarMeshSet.refreshCameraParams(cameraParams);
-        me.ogCarMeshSet.refreshCameraParams(cameraParams);
-        me.aircraftMeshSet.refreshCameraParams(cameraParams);
-        me.busMeshSet.refreshCameraParams(cameraParams);
+        if (me.isLondon) {
+            trainCameraParams.delayMarkerModelScale = modelScale;
+        }
+        me.ugCarMeshSet.refreshCameraParams(trainCameraParams);
+        me.ogCarMeshSet.refreshCameraParams(trainCameraParams);
+        me.aircraftMeshSet.refreshCameraParams(otherCameraParams);
+        me.busMeshSet.refreshCameraParams(otherCameraParams);
     }
 
     setMode(viewMode, searchMode) {
