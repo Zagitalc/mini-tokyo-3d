@@ -2869,6 +2869,73 @@ export default class extends Evented {
             modal
         };
 
+        modal.innerHTML = [
+            '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title" tabindex="-1">',
+            '<div class="london-card-header london-status-header">',
+            '<div>',
+            '<div class="london-card-eyebrow">Network-wide</div>',
+            '<h2 id="london-status-title">Line Status</h2>',
+            '<p class="london-status-updated">Live updates • Waiting for live data</p>',
+            '</div>',
+            '<button type="button" class="london-panel-close" aria-label="Close line status">×</button>',
+            '</div>',
+            '<div class="london-status-dialog-body">',
+            '<div class="london-status-summary-region"></div>',
+            '<div class="london-status-grid"></div>',
+            '</div>',
+            '</div>'
+        ].join('');
+        modal.setAttribute('aria-hidden', 'true');
+        me._londonUI.statusDialog = modal.querySelector('.london-status-dialog');
+        me._londonUI.statusUpdated = modal.querySelector('.london-status-updated');
+        me._londonUI.statusClose = modal.querySelector('.london-panel-close');
+        me._londonUI.statusBody = modal.querySelector('.london-status-dialog-body');
+        me._londonUI.statusSummary = modal.querySelector('.london-status-summary-region');
+        me._londonUI.statusGrid = modal.querySelector('.london-status-grid');
+
+        modal.addEventListener('click', event => {
+            if (event.target === modal) {
+                me.closeLondonStatusModal();
+            }
+        });
+        me._londonUI.statusClose.addEventListener('click', () => {
+            me.closeLondonStatusModal();
+        });
+        modal.addEventListener('keydown', event => {
+            if (!me._londonStatusModalOpen || event.key !== 'Tab') {
+                return;
+            }
+
+            const focusable = Array.from(me._londonUI.statusDialog.querySelectorAll([
+                'a[href]',
+                'button:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                'textarea:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])'
+            ].join(','))).filter(element => element.offsetParent !== null);
+
+            if (!focusable.length) {
+                event.preventDefault();
+                me._londonUI.statusClose.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (!me._londonUI.statusDialog.contains(document.activeElement)) {
+                event.preventDefault();
+                (event.shiftKey ? last : first).focus();
+            } else if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+
         me.initLondonTheme();
 
         me._londonSearchPanelOpen = typeof window !== 'undefined' ?
@@ -2942,6 +3009,11 @@ export default class extends Evented {
             '</button>',
             '</div>'
         ].join('');
+
+        if (me._londonStatusModalOpen && me._londonStatusInertState && !me._londonStatusInertState.has(ui.topbar)) {
+            me._londonStatusInertState.set(ui.topbar, ui.topbar.inert);
+            ui.topbar.inert = true;
+        }
 
         ui.topbar.querySelector('.london-theme-toggle').addEventListener('click', () => {
             me.toggleLondonTheme();
@@ -3119,15 +3191,60 @@ export default class extends Evented {
     openLondonStatusModal() {
         const me = this;
 
+        if (me._londonStatusModalOpen || !me._londonUI) {
+            return;
+        }
+
+        me._londonStatusTrigger = me._londonUI.topbar.querySelector('.london-status-trigger');
+        me._londonStatusInertState = new Map();
+        const mapCanvas = me.container.querySelector('.mapboxgl-canvas-container');
+        const mapControls = me.container.querySelector('.mapboxgl-control-container');
+        const backgroundTargets = [
+            me._londonUI.topbar,
+            me._londonUI.searchPanel,
+            me._londonUI.drawer,
+            mapCanvas,
+            mapControls
+        ];
+
+        for (const element of backgroundTargets) {
+            if (!element || !element.isConnected || me._londonStatusInertState.has(element)) {
+                continue;
+            }
+            me._londonStatusInertState.set(element, element.inert);
+            element.inert = true;
+        }
         me._londonStatusModalOpen = true;
         me.renderLondonStatusModal();
+        me._londonUI.statusClose.focus();
     }
 
     closeLondonStatusModal() {
         const me = this;
 
+        if (!me._londonStatusModalOpen || !me._londonUI) {
+            return;
+        }
+
         me._londonStatusModalOpen = false;
         me.renderLondonStatusModal();
+
+        if (me._londonStatusInertState) {
+            for (const entry of me._londonStatusInertState) {
+                const element = entry[0];
+                const previousValue = entry[1];
+
+                if (element.isConnected) {
+                    element.inert = previousValue;
+                }
+            }
+            me._londonStatusInertState.clear();
+        }
+
+        if (me._londonStatusTrigger && me._londonStatusTrigger.isConnected) {
+            me._londonStatusTrigger.focus();
+        }
+        me._londonStatusTrigger = null;
     }
 
     renderLondonStatusModal() {
@@ -3157,49 +3274,38 @@ export default class extends Evented {
             }).format(new Date(me._londonLineStatusUpdatedAt))
             : 'Waiting for live data';
 
+        const previousScrollTop = ui.statusBody.scrollTop;
+        const activeElement = document.activeElement;
+        const activeElementWasInDialog = activeElement && ui.statusDialog.contains(activeElement);
+
         ui.modal.classList.toggle('open', !!me._londonStatusModalOpen);
-        ui.modal.innerHTML = me._londonStatusModalOpen ? [
-            '<div class="london-status-modal-backdrop"></div>',
-            '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title">',
-            '<div class="london-card-header london-status-header">',
-            '<div>',
-            '<div class="london-card-eyebrow">Network-wide</div>',
-            '<h2 id="london-status-title">Line Status</h2>',
-            `<p>Live updates • ${escapeHTML(updatedLabel)}</p>`,
-            '</div>',
-            '<button type="button" class="london-panel-close" aria-label="Close line status">×</button>',
-            '</div>',
-            severeRecords.length ? [
-                '<div class="london-severe-summary">',
-                '<strong>Severe delays</strong>',
-                `<span>${escapeHTML(severeRecords.map(record => record.title).join(' • '))}</span>`,
-                '</div>'
-            ].join('') : '',
-            '<div class="london-status-grid">',
-            records.map(record => [
-                `<div class="london-status-card ${getLondonStatusTone(record.statusText)}">`,
-                `<span class="london-status-line" style="background-color:${escapeHTML(record.color)};"></span>`,
-                '<div class="london-status-card-copy">',
-                `<strong>${escapeHTML(record.title)}</strong>`,
-                `<span class="status-text ${getLondonStatusTone(record.statusText)}">${escapeHTML(record.statusText)}</span>`,
-                record.reason ? `<span class="status-reason">${escapeHTML(record.reason)}</span>` : '',
-                '</div>',
-                '</div>'
-            ].join('')).join(''),
-            '</div>',
+        ui.modal.setAttribute('aria-hidden', me._londonStatusModalOpen ? 'false' : 'true');
+        ui.statusUpdated.textContent = `Live updates • ${updatedLabel}`;
+        ui.statusSummary.innerHTML = severeRecords.length ? [
+            '<div class="london-severe-summary">',
+            '<strong>Severe delays</strong>',
+            `<span>${escapeHTML(severeRecords.map(record => record.title).join(' • '))}</span>`,
             '</div>'
         ].join('') : '';
+        ui.statusGrid.innerHTML = records.map(record => [
+            `<div class="london-status-card ${getLondonStatusTone(record.statusText)}">`,
+            `<span class="london-status-line" style="background-color:${escapeHTML(record.color)};"></span>`,
+            '<div class="london-status-card-copy">',
+            `<strong>${escapeHTML(record.title)}</strong>`,
+            `<span class="status-text ${getLondonStatusTone(record.statusText)}">${escapeHTML(record.statusText)}</span>`,
+            record.reason ? `<span class="status-reason">${escapeHTML(record.reason)}</span>` : '',
+            '</div>',
+            '</div>'
+        ].join('')).join('');
 
-        if (!me._londonStatusModalOpen) {
-            return;
+        ui.statusBody.scrollTop = Math.min(previousScrollTop, Math.max(0, ui.statusBody.scrollHeight - ui.statusBody.clientHeight));
+        if (me._londonStatusModalOpen && activeElementWasInDialog) {
+            if (activeElement.isConnected && ui.statusDialog.contains(activeElement)) {
+                activeElement.focus();
+            } else {
+                ui.statusClose.focus();
+            }
         }
-
-        ui.modal.querySelector('.london-status-modal-backdrop').addEventListener('click', () => {
-            me.closeLondonStatusModal();
-        });
-        ui.modal.querySelector('.london-panel-close').addEventListener('click', () => {
-            me.closeLondonStatusModal();
-        });
     }
 
     renderLondonStationDrawer() {
