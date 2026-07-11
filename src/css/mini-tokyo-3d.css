@@ -1443,7 +1443,7 @@
     top: 110px;
     left: 16px;
     width: min(328px, calc(100% - 32px));
-    max-height: calc(100% - 126px);
+    max-height: calc(100dvh - 126px);
     border-radius: 24px;
     padding: 18px;
     opacity: 0;
@@ -1458,10 +1458,10 @@
     transform: translateY(0);
 }
 .mini-tokyo-3d.is-london .london-station-drawer {
-    top: 88px;
+    top: 110px;
     right: 16px;
     width: min(380px, calc(100% - 32px));
-    max-height: calc(100% - 104px);
+    max-height: calc(100dvh - 126px);
     border-radius: 24px;
     padding: 18px;
     display: flex;
@@ -2055,15 +2055,15 @@
     }
     .mini-tokyo-3d.is-london .london-search-panel {
         top: 152px;
-        max-height: calc(100% - 168px);
+        max-height: calc(100dvh - 168px);
     }
     .mini-tokyo-3d.is-london .london-station-drawer {
         left: 16px;
         right: 16px;
         top: auto;
-        bottom: 16px;
+        bottom: max(16px, env(safe-area-inset-bottom));
         width: auto;
-        max-height: min(72vh, 560px);
+        max-height: min(72dvh, 560px, calc(100dvh - 168px));
         transform: translateY(24px);
     }
     .mini-tokyo-3d.is-london .london-station-drawer.open {
