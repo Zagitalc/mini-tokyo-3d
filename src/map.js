@@ -2901,6 +2901,11 @@ export default class extends Evented {
         me._londonUI.statusClose.addEventListener('click', () => {
             me.closeLondonStatusModal();
         });
+        modal.addEventListener('transitionend', event => {
+            if (event.target === modal && event.propertyName === 'opacity' && me._londonStatusModalOpen) {
+                me._londonUI.statusClose.focus({preventScroll: true});
+            }
+        });
         modal.addEventListener('keydown', event => {
             if (!me._londonStatusModalOpen || event.key !== 'Tab') {
                 return;
@@ -3216,7 +3221,11 @@ export default class extends Evented {
         }
         me._londonStatusModalOpen = true;
         me.renderLondonStatusModal();
-        me._londonUI.statusClose.focus();
+        setTimeout(() => {
+            if (me._londonStatusModalOpen && me._londonUI.statusClose.isConnected) {
+                me._londonUI.statusClose.focus({preventScroll: true});
+            }
+        }, 220);
     }
 
     closeLondonStatusModal() {
@@ -3241,9 +3250,13 @@ export default class extends Evented {
             me._londonStatusInertState.clear();
         }
 
-        if (me._londonStatusTrigger && me._londonStatusTrigger.isConnected) {
-            me._londonStatusTrigger.focus();
-        }
+        const statusTrigger = me._londonStatusTrigger;
+
+        setTimeout(() => {
+            if (statusTrigger && statusTrigger.isConnected) {
+                statusTrigger.focus();
+            }
+        }, 0);
         me._londonStatusTrigger = null;
     }
 
