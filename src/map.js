@@ -2869,6 +2869,50 @@ export default class extends Evented {
             modal
         };
 
+        drawer.innerHTML = [
+            '<div class="london-station-drawer-inner">',
+            '<div class="london-card-header london-station-header">',
+            '<div>',
+            '<h2 class="london-station-title"></h2>',
+            '<div class="london-station-line-strip"></div>',
+            '<div class="london-line-pill-row london-station-line-pills"></div>',
+            '</div>',
+            '<button type="button" class="london-panel-close" aria-label="Close station details">×</button>',
+            '</div>',
+            '<div class="london-station-drawer-body" tabindex="0" aria-label="Station details"></div>',
+            '<div class="london-drawer-footer">',
+            '<button type="button" class="london-primary-button london-center-station"></button>',
+            '<span class="london-drawer-footer-meta"></span>',
+            '</div>',
+            '</div>'
+        ].join('');
+        drawer.setAttribute('aria-hidden', 'true');
+        me._londonUI.drawerTitle = drawer.querySelector('.london-station-title');
+        me._londonUI.drawerLineStrip = drawer.querySelector('.london-station-line-strip');
+        me._londonUI.drawerLinePills = drawer.querySelector('.london-station-line-pills');
+        me._londonUI.drawerClose = drawer.querySelector('.london-panel-close');
+        me._londonUI.drawerBody = drawer.querySelector('.london-station-drawer-body');
+        me._londonUI.drawerCenter = drawer.querySelector('.london-center-station');
+        me._londonUI.drawerUpdated = drawer.querySelector('.london-drawer-footer-meta');
+
+        me._londonUI.drawerClose.addEventListener('click', () => {
+            me._londonStationDrawerScrollState = null;
+            me._londonStationDrawerSelection = null;
+            me.trackObject();
+        });
+        me._londonUI.drawerCenter.addEventListener('click', () => {
+            const selection = me._londonStationDrawerSelection;
+            const coords = selection ? selection.stations.map(station => station.coord).filter(Boolean) : [];
+
+            if (coords.length) {
+                me.map.flyTo({
+                    center: helpersMapbox.getBounds(coords).getCenter(),
+                    zoom: 16,
+                    pitch: me.map.getPitch()
+                });
+            }
+        });
+
         modal.innerHTML = [
             '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title" tabindex="-1">',
             '<div class="london-card-header london-status-header">',
@@ -3330,11 +3374,18 @@ export default class extends Evented {
             return;
         }
 
+        if (ui.drawer.classList.contains('open') && me._londonStationDrawerScrollState) {
+            me._londonStationDrawerScrollState.scrollTop = ui.drawerBody.scrollTop;
+        }
+
         ui.drawer.classList.toggle('open', !!selection);
+        ui.drawer.setAttribute('aria-hidden', selection ? 'false' : 'true');
         if (!selection) {
-            ui.drawer.innerHTML = '';
+            me._londonStationDrawerSelection = null;
             return;
         }
+
+        me._londonStationDrawerSelection = selection;
 
         if (me._londonStationHoverPopup && me._londonStationHoverPopup.isOpen()) {
             me._londonStationHoverPopup.remove();
@@ -3355,26 +3406,22 @@ export default class extends Evented {
         const loadingDepartures = !!(drawerData && drawerData.loading);
         const hasLiveDepartureData = departureGroups.length > 0;
         const stationMapLabel = `Center ${title}`;
+        const previousScrollTop = me._londonStationDrawerScrollState && me._londonStationDrawerScrollState.selectionId === selection.id
+            ? me._londonStationDrawerScrollState.scrollTop
+            : 0;
+        const activeElement = document.activeElement;
+        const activeElementWasInDrawer = activeElement && ui.drawer.contains(activeElement);
 
-        ui.drawer.innerHTML = [
-            '<div class="london-station-drawer-inner">',
-            '<div class="london-card-header london-station-header">',
-            '<div>',
-            `<h2>${escapeHTML(title)}</h2>`,
-            '<div class="london-station-line-strip">',
-            stationStatuses.map(record => `<span style="background-color:${escapeHTML(record.color)};"></span>`).join(''),
-            '</div>',
-            '<div class="london-line-pill-row">',
-            stationStatuses.map(record => [
-                `<span class="london-line-pill" style="--line-color:${escapeHTML(record.color)};">`,
-                escapeHTML(record.title),
-                '</span>'
-            ].join('')).join(''),
-            '</div>',
-            '</div>',
-            '<button type="button" class="london-panel-close" aria-label="Close station details">×</button>',
-            '</div>',
-            '<div class="london-station-drawer-body">',
+        ui.drawerTitle.textContent = title;
+        ui.drawerLineStrip.innerHTML = stationStatuses
+            .map(record => `<span style="background-color:${escapeHTML(record.color)};"></span>`)
+            .join('');
+        ui.drawerLinePills.innerHTML = stationStatuses.map(record => [
+            `<span class="london-line-pill" style="--line-color:${escapeHTML(record.color)};">`,
+            escapeHTML(record.title),
+            '</span>'
+        ].join('')).join('');
+        ui.drawerBody.innerHTML = [
             '<section class="london-drawer-section">',
             (disruptedStatuses.length ? disruptedStatuses.map(record => [
                 `<div class="london-status-alert ${getLondonStatusTone(record.statusText)}">`,
@@ -3434,29 +3481,19 @@ export default class extends Evented {
                     '</div>'
                 ].join('')).join('') :
                 '<div class="london-empty-state">No live arrival data is available for this station right now.</div>'),
-            '</section>',
-            '</div>',
-            '<div class="london-drawer-footer">',
-            `<button type="button" class="london-primary-button london-center-station">${escapeHTML(stationMapLabel)}</button>`,
-            `<span class="london-drawer-footer-meta">Last updated ${escapeHTML(updatedLabel)}</span>`,
-            '</div>',
-            '</div>'
+            '</section>'
         ].join('');
+        ui.drawerCenter.textContent = stationMapLabel;
+        ui.drawerUpdated.textContent = `Last updated ${updatedLabel}`;
+        ui.drawerBody.scrollTop = Math.min(previousScrollTop, Math.max(0, ui.drawerBody.scrollHeight - ui.drawerBody.clientHeight));
+        me._londonStationDrawerScrollState = {
+            selectionId: selection.id,
+            scrollTop: ui.drawerBody.scrollTop
+        };
 
-        ui.drawer.querySelector('.london-panel-close').addEventListener('click', () => {
-            me.trackObject();
-        });
-        ui.drawer.querySelector('.london-center-station').addEventListener('click', () => {
-            const coords = selection.stations.map(station => station.coord).filter(Boolean);
-
-            if (coords.length) {
-                me.map.flyTo({
-                    center: helpersMapbox.getBounds(coords).getCenter(),
-                    zoom: 16,
-                    pitch: me.map.getPitch()
-                });
-            }
-        });
+        if (activeElementWasInDrawer && !activeElement.isConnected) {
+            ui.drawerClose.focus();
+        }
     }
 
     getLondonStationIndexLookup(railway) {
