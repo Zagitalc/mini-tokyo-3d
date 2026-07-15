@@ -22,6 +22,8 @@ Do not add `npm ci` to that command unless automatic dependency installation is 
 
 The generated `config.local.js` is necessary because `index.html` loads it unconditionally, while `public/config.local.js` is intentionally excluded from Git. The generated file contains only browser-public configuration and must never contain a TfL credential.
 
+The normal `build-data:london` step copies the deterministic compressed runtime snapshot from `assets/london-build-data`. This directory is tracked so clean Cloudflare checkouts do not depend on the ignored local `data-london` source directory. Maintainers may regenerate the snapshot locally with `npm run build && npm run build-data:london:source`, verify `assets/london-build-data/manifest.json`, and commit an intentional snapshot update separately. Hosted builds must not call the source-data command.
+
 ### Credentials and first-deployment behavior
 
 The Mapbox access token is expected to reach the browser. Restrict it to the assigned production and preview origins in Mapbox before promoting the site.
