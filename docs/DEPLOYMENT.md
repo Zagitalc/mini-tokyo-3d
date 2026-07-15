@@ -1,6 +1,6 @@
 # Mini London 3D deployment
 
-This document prepares a future static deployment. It does not create a provider project, DNS record, Worker, Pages Function, workflow, redirect, or deployment hook.
+This document prepares a future static deployment. It does not create or alter a provider project, account, credential, DNS record, Worker, Pages Function, workflow, redirect, deployment hook, attribution label, or provider credit. Following this guide's repository checks does not push or deploy the application.
 
 ## Recommended host: Cloudflare Pages
 
@@ -28,9 +28,25 @@ The Mapbox access token is expected to reach the browser. Restrict it to the ass
 
 Cloudflare build environment variables are not automatically private from browser code. Any value written into a static asset becomes public. Never embed a TfL app key in the bundle, `config.local.js`, a committed configuration file, or a frontend build variable.
 
-The first deployment may use the application's existing unauthenticated direct TfL requests. Live trains and service data are therefore best-effort: if TfL rejects, rate-limits, or blocks a request, the existing unavailable states remain the expected behavior.
+### TfL credential revocation and repository scanning
 
-Before treating live data as production-reliable, add a Pages Function or Worker proxy. Store the TfL key as a server-side Cloudflare secret and expose only the proxy base URL through the existing `tflProxyBase` option.
+The TfL credential previously found in ignored local runtime configuration must be treated as compromised. The user must revoke it through an authorised TfL account before any public preview and must never reuse it. Repository work cannot prove revocation: record it as an external deployment prerequisite unless its status is verified through the authorised account interface.
+
+Before preview deployment, scan the current tracked tree and reachable Git history using the known TfL configuration-key patterns, the known credential format without printing its value, and recognised secret scanners where available. Record scanner names and scopes, but report only affected file paths, commit identifiers and remediation status. A `git grep` result alone cannot establish that no historical credential ever existed.
+
+Use one of these sanitised conclusions:
+
+```text
+No tracked or historical TfL credential was detected by the documented checks.
+```
+
+```text
+Potential historical exposure was detected; affected commits and remediation steps are reported without exposing the credential.
+```
+
+A public preview may use the application's unauthenticated direct TfL requests only after external credential revocation. Live trains and service data remain best-effort: rejected, rate-limited, blocked and unavailable responses must retain visible graceful states. Do not describe this mode as reliable production live data.
+
+Before treating live data as production-reliable, add a same-origin Pages Function or Worker proxy. Store the rotated TfL credential as a server-side Cloudflare secret, allowlist the exact required TfL paths and HTTP methods, inject the credential server-side, and reject arbitrary upstream URLs so the endpoint cannot become an open proxy. Expose only the proxy base URL through the existing `tflProxyBase` option.
 
 ### Build acceptance
 
@@ -66,9 +82,34 @@ Before deployment, confirm:
 - the build contains fewer than 20,000 files;
 - no individual asset exceeds 25 MiB;
 - direct navigation and static asset loading succeed;
+- browser-facing output contains no TfL credential;
+- `index.html` and `config.local.js` use revalidation or no-cache behavior and never immutable caching;
+- immutable caching is used only for genuinely content-addressed assets;
 - the generated HTML contains no inherited Mini Tokyo domain, analytics ID, or social ownership metadata.
 
 Cloudflare Pages Free currently permits 500 builds per month, up to 20,000 files per project, and a maximum individual asset size of 25 MiB. Static-asset requests are free and unlimited. Check the current [Pages limits](https://developers.cloudflare.com/pages/platform/limits/), [static-asset pricing](https://developers.cloudflare.com/workers/platform/pricing/), and [build image documentation](https://developers.cloudflare.com/pages/configuration/build-image/) before deployment.
+
+## Preview gate
+
+Do not create a public preview until all of the following are true:
+
+- the compromised TfL credential has been revoked through the authorised account interface, or preview remains blocked;
+- the exact Pages preview origin is included in the public Mapbox token's URL restrictions;
+- the generated runtime configuration contains only the restricted Mapbox token and `city: "london"`, plus an approved `tflProxyBase` only when a proxy exists;
+- direct navigation, static assets and graceful TfL unavailable states have been tested;
+- browser-facing output contains no credential or local runtime configuration;
+- the preview is labelled best-effort and is not presented as production-reliable live service.
+
+## Production gate
+
+Do not promote a preview to production until all of the following are true:
+
+- reviewed work has been merged into `master`;
+- the restricted same-origin TfL proxy is complete and uses a rotated server-side credential;
+- the final domain has been assigned before canonical, Open Graph URL and social-image metadata are added;
+- [the Mini London 3D source repository](https://github.com/Zagitalc/mini-london-3d) is publicly accessible;
+- analytics and social-account metadata remain absent unless project-owned values and consent requirements are confirmed;
+- preview network traffic has been observed before enforcing CSP or other security headers, so Mapbox workers, WebGL resources and approved TfL traffic remain functional.
 
 ## Public metadata required before production
 
@@ -81,6 +122,8 @@ Do not promote a Pages preview to production until `public/index.html` and the g
 - Verify the Mini London 3D title, description, locale, site name, and social preview.
 
 Until those values are confirmed, omit the inherited Mini Tokyo URLs, image, Twitter account, and Google Analytics measurement ID instead of inventing replacements.
+
+Project source: [Zagitalc/mini-london-3d](https://github.com/Zagitalc/mini-london-3d). Upstream software attribution and licence notices remain separate and must be preserved.
 
 ## Free-host alternatives
 
