@@ -30,6 +30,9 @@ const configs = {
     // Default data root (Map overrides this at runtime for localhost/London)
     dataUrl: 'https://minitokyo3d.com/data',
 
+    // Credit for the upstream Mini Tokyo 3D project
+    customAttribution: '<a href="https://github.com/nagix/mini-tokyo-3d">© Akihiko Kusanagi</a>',
+
     // Rendering defaults
     defaultEcoMode: 'normal',
     defaultEcoFrameRate: 30,

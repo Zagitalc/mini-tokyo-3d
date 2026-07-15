@@ -11,6 +11,7 @@ import { ClockControl, MapboxGLButtonControl, SearchControl } from './controls';
 import Dataset from './dataset';
 import { Airport, Flight, FlightStatus, Operator, POI, RailDirection, Railway, Station, Train, TrainTimetables, TrainType, TrainVehicleType } from './data-classes';
 import extend from './extend';
+import {normalizeCustomAttributions} from './helpers/attributions.mjs';
 import * as helpers from './helpers/helpers';
 import { pickObject } from './helpers/helpers-deck';
 import * as helpersGeojson from './helpers/helpers-geojson';
@@ -359,9 +360,9 @@ export default class extends Evented {
             ? 'mapbox://styles/mapbox/light-v11'
             : 'assets/style.json';
 
-        // The custom attribution will be appended only if ConfigControl is visible
+        // Show the upstream project credit when ConfigControl is not visible.
         if (!options.configControl) {
-            options.customAttribution = helpers.flat([options.customAttribution, configs.customAttribution]);
+            options.customAttribution = normalizeCustomAttributions(options.customAttribution, configs.customAttribution);
         }
 
         me.map = new Mapbox(options);
