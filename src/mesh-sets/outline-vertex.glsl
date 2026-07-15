@@ -1,6 +1,8 @@
 uniform float zoom;
 uniform float cameraZ;
 uniform float modelScale;
+uniform float carLift;
+uniform float outlinePadding;
 uniform sampler2D textureData0;
 uniform sampler2D textureData1;
 uniform int marked;
@@ -66,12 +68,12 @@ void main() {
     #endif
 
     position0 = position0 * ( 1.0 + float( instanceID % 256 ) / 256.0 * 0.03 );
-    position0 = position0 + 0.1 * scale0 * sign( position );
+    position0 = position0 + outlinePadding * scale0 * sign( position );
 
     #ifdef BUS
     vec3 transformed = rotateZ( rotationZ ) * position0 + translation + vec3( 0.0, 0.0, 0.3 * scale0 );
     #else
-    vec3 transformed = rotateZ( rotationZ ) * rotateX( rotationX ) * position0 + translation + vec3( 0.0, 0.0, 0.44 * scale0 );
+    vec3 transformed = rotateZ( rotationZ ) * rotateX( rotationX ) * position0 + translation + vec3( 0.0, 0.0, carLift * scale0 );
     #endif
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4( transformed, 1.0 );

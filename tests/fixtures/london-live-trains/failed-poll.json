@@ -1,0 +1,1 @@
+{"polls":[{"timestamp":0,"linePolls":[{"lineId":"victoria","success":true,"observationsComplete":true,"observations":[{"vehicleId":"V1","direction":"outbound","routeId":"victoria-main","sectionIndex":4,"sectionProgress":0.5}]}]},{"timestamp":30000,"linePolls":[{"lineId":"victoria","success":false,"observationsComplete":false,"observations":[]}]}]}

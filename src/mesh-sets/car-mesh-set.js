@@ -1,7 +1,13 @@
 import {AdditiveBlending, BackSide, BoxGeometry, Mesh, MeshLambertMaterial, MultiplyBlending, ShaderMaterial, SphereGeometry} from 'three';
 import CarGeometry from './car-geometry.js';
 import InstancedGeometry from './instanced-geometry.js';
+import LondonTubeCarGeometry, {LONDON_TUBE_MARKER_PROFILE} from './london-tube-car-geometry.js';
 import MeshSet from './mesh-set.js';
+import {
+    getCarGeometryArguments,
+    resolveCarDimensions,
+    resolveCarModelScales
+} from '../helpers/train-marker-visuals.mjs';
 import {updateVertexShader, updateFragmentShader} from './shaders.js';
 import delayMarkerFragmentShader from './delay-marker-fragment.glsl';
 import delayMarkerVertexShader from './delay-marker-vertex.glsl';
@@ -15,9 +21,24 @@ export default class extends MeshSet {
     constructor(count, parameters) {
         super(parameters);
 
-        const me = this;
+        const me = this,
+            isLondonTube = me.markerStyle = parameters.markerStyle === 'london-tube',
+            dimensions = me.dimensions = isLondonTube ? {
+                width: LONDON_TUBE_MARKER_PROFILE.width,
+                height: LONDON_TUBE_MARKER_PROFILE.totalLength,
+                depth: LONDON_TUBE_MARKER_PROFILE.height
+            } : resolveCarDimensions(parameters.dimensions),
+            geometryArguments = getCarGeometryArguments(dimensions),
+            scales = resolveCarModelScales(parameters);
 
-        const carGeometry = new CarGeometry(.88, 1.76, .88);
+        me.independentDelayMarkerScale = scales.independentDelayMarkerScale;
+        me.delayMarkerModelScale = {value: scales.delayMarkerModelScale};
+
+        me.uniforms.outlinePadding = {
+            value: isLondonTube ? LONDON_TUBE_MARKER_PROFILE.outlinePadding : 0.1
+        };
+
+        const carGeometry = isLondonTube ? new LondonTubeCarGeometry() : new CarGeometry(...geometryArguments);
         const geometry = me.geometry = new InstancedGeometry(carGeometry, count);
 
         carGeometry.dispose();
@@ -36,7 +57,10 @@ export default class extends MeshSet {
             Object.assign(shader.uniforms, me.getUniforms());
             shader.vertexShader = updateVertexShader(shader.vertexShader);
             shader.fragmentShader = updateFragmentShader(shader.fragmentShader);
-            shader.defines = {CAR: true};
+            shader.defines = {
+                CAR: true,
+                ...(isLondonTube ? {LONDON_TUBE: true} : {})
+            };
         };
 
         const mesh = me.mesh = new Mesh(geometry, material);
@@ -66,6 +90,7 @@ export default class extends MeshSet {
         const delayMarkerMaterial = me.delayMarkerMaterial = new ShaderMaterial({
             uniforms: {
                 ...me.getUniforms(),
+                modelScale: me.delayMarkerModelScale,
                 base: {value: 1}
             },
             vertexShader: delayMarkerVertexShader,
@@ -80,7 +105,12 @@ export default class extends MeshSet {
         delayMarkerMesh.matrixAutoUpdate = false;
         delayMarkerMesh.frustumCulled = false;
 
-        const boxGeometry = new BoxGeometry(.88, 1.76, .88);
+        const outlineArguments = isLondonTube ? [
+            LONDON_TUBE_MARKER_PROFILE.outlineWidth,
+            LONDON_TUBE_MARKER_PROFILE.outlineLength,
+            LONDON_TUBE_MARKER_PROFILE.outlineHeight
+        ] : geometryArguments;
+        const boxGeometry = new BoxGeometry(...outlineArguments);
         const outlineGeometry = me.outlineGeometry = new InstancedGeometry(boxGeometry, 2);
 
         boxGeometry.dispose();
@@ -104,6 +134,17 @@ export default class extends MeshSet {
         outlineMesh.updateMatrix();
         outlineMesh.matrixAutoUpdate = false;
         outlineMesh.frustumCulled = false;
+    }
+
+    refreshCameraParams(params) {
+        const me = this;
+
+        super.refreshCameraParams(params);
+        if (params.delayMarkerModelScale !== undefined) {
+            me.delayMarkerModelScale.value = params.delayMarkerModelScale;
+        } else if (!me.independentDelayMarkerScale && params.modelScale !== undefined) {
+            me.delayMarkerModelScale.value = params.modelScale;
+        }
     }
 
     setTextures(textures) {

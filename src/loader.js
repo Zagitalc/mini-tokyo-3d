@@ -98,15 +98,27 @@ export function loadStaticData(dataUrl, lang, clockPromise, city) {
             loadJSON(`${dataUrl}/stations.json.gz`),
             loadJSON(`${dataUrl}/station-groups.json.gz`),
             loadJSON(`${dataUrl}/features.json.gz`),
+            loadJSON(`${dataUrl}/london-route-display.json.gz`),
             loadJSON(`${dataUrl}/rail-directions.json.gz`),
             loadJSON(`${dataUrl}/train-types.json.gz`),
             loadJSON(`${dataUrl}/train-vehicles.json.gz`)
-        ]).then(([dict, railwayData, stationData, stationGroupData, featureCollection, railDirectionData, trainTypeData, trainVehicleData]) => ({
+        ]).then(([
             dict,
             railwayData,
             stationData,
             stationGroupData,
             featureCollection,
+            londonRailDisplayData,
+            railDirectionData,
+            trainTypeData,
+            trainVehicleData
+        ]) => ({
+            dict,
+            railwayData,
+            stationData,
+            stationGroupData,
+            featureCollection,
+            londonRailDisplayData,
             railDirectionData,
             trainTypeData,
             trainVehicleData,

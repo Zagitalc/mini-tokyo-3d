@@ -1206,6 +1206,15 @@
     --london-button-bg: rgba(8, 18, 42, 0.78);
     --london-card-muted-bg: rgba(10, 20, 46, 0.6);
     --london-shadow: 0 20px 44px rgba(0, 0, 0, 0.34);
+    --london-status-title: #f8fafc;
+    --london-status-body: #cbd5e1;
+    --london-status-good: #4ade80;
+    --london-status-minor: #fbbf24;
+    --london-status-severe: #f87171;
+    --london-status-minor-bg: rgba(120, 53, 15, 0.28);
+    --london-status-minor-border: rgba(251, 191, 36, 0.32);
+    --london-status-severe-bg: rgba(127, 29, 29, 0.28);
+    --london-status-severe-border: rgba(248, 113, 113, 0.35);
     background:
         radial-gradient(circle at top left, rgba(27, 109, 255, 0.18), transparent 28%),
         linear-gradient(180deg, #030814 0%, #061125 100%);
@@ -1243,6 +1252,26 @@
 }
 .mini-tokyo-3d.is-london .mapboxgl-ctrl-group button:hover {
     background-color: rgba(17, 59, 146, 0.08);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl-group {
+    border-color: rgba(148, 163, 184, 0.42);
+    background: rgba(7, 18, 42, 0.96);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl-group button {
+    background-color: transparent;
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl-group button + button {
+    border-top-color: rgba(148, 163, 184, 0.32);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl-group button:not(:disabled):hover {
+    background-color: rgba(83, 180, 255, 0.2);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl-icon {
+    filter: brightness(0) invert(1);
+    opacity: 0.9;
+}
+.mini-tokyo-3d.is-london.london-theme-dark .mapboxgl-ctrl button:disabled .mapboxgl-ctrl-icon {
+    opacity: 0.32;
 }
 .mini-tokyo-3d.is-london .clock-ctrl {
     min-width: 132px;
@@ -1440,10 +1469,10 @@
     backdrop-filter: blur(18px);
 }
 .mini-tokyo-3d.is-london .london-search-panel {
-    top: 88px;
+    top: 110px;
     left: 16px;
     width: min(328px, calc(100% - 32px));
-    max-height: calc(100% - 104px);
+    max-height: calc(100dvh - 126px);
     border-radius: 24px;
     padding: 18px;
     opacity: 0;
@@ -1458,10 +1487,10 @@
     transform: translateY(0);
 }
 .mini-tokyo-3d.is-london .london-station-drawer {
-    top: 88px;
+    top: 110px;
     right: 16px;
     width: min(380px, calc(100% - 32px));
-    max-height: calc(100% - 104px);
+    max-height: calc(100dvh - 126px);
     border-radius: 24px;
     padding: 18px;
     display: flex;
@@ -1691,36 +1720,47 @@
 .mini-tokyo-3d.is-london .london-status-modal {
     position: absolute;
     inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px max(24px, env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    background: rgba(12, 12, 12, 0.16);
+    backdrop-filter: blur(8px);
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
     transition: opacity .2s ease, visibility .2s ease;
 }
 .mini-tokyo-3d.is-london .london-status-modal.open {
     opacity: 1;
     visibility: visible;
-}
-.mini-tokyo-3d.is-london .london-status-modal-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(12, 12, 12, 0.16);
-    backdrop-filter: blur(8px);
+    pointer-events: auto;
 }
 .mini-tokyo-3d.is-london .london-status-dialog {
-    position: absolute;
-    top: 50%;
-    left: 50%;
     width: min(720px, calc(100% - 32px));
-    max-height: calc(100% - 48px);
+    max-height: calc(100dvh - 48px);
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 22px;
-    overflow: auto;
+    box-sizing: border-box;
+    overflow: hidden;
     border: 1px solid var(--london-border);
     border-radius: 28px;
     background: var(--london-surface-strong);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.16);
-    transform: translate(-50%, -50%);
+}
+.mini-tokyo-3d.is-london .london-status-dialog-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    gap: 16px;
+    overflow: auto;
+    padding-right: 4px;
+    margin-right: -4px;
+    scrollbar-gutter: stable;
 }
 .mini-tokyo-3d.is-london .london-severe-summary {
     display: flex;
@@ -1759,6 +1799,36 @@
 .mini-tokyo-3d.is-london .london-departure-heading {
     color: var(--london-text);
     font-weight: 700;
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card-copy strong,
+.mini-tokyo-3d.is-london.london-theme-dark .london-severe-summary strong {
+    color: var(--london-status-title);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-header p,
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card .status-reason,
+.mini-tokyo-3d.is-london.london-theme-dark .london-severe-summary span {
+    color: var(--london-status-body);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card .status-text.good,
+.mini-tokyo-3d.is-london.london-theme-dark .line-status.good {
+    color: var(--london-status-good);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card .status-text.minor,
+.mini-tokyo-3d.is-london.london-theme-dark .line-status.minor {
+    color: var(--london-status-minor);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card .status-text.severe,
+.mini-tokyo-3d.is-london.london-theme-dark .line-status.severe {
+    color: var(--london-status-severe);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card.minor {
+    border-color: var(--london-status-minor-border);
+    background: var(--london-status-minor-bg);
+}
+.mini-tokyo-3d.is-london.london-theme-dark .london-status-card.severe,
+.mini-tokyo-3d.is-london.london-theme-dark .london-severe-summary {
+    border-color: var(--london-status-severe-border);
+    background: var(--london-status-severe-bg);
 }
 .mini-tokyo-3d.is-london .london-departure-group {
     display: flex;
@@ -2054,15 +2124,16 @@
         justify-content: space-between;
     }
     .mini-tokyo-3d.is-london .london-search-panel {
-        top: 132px;
+        top: 152px;
+        max-height: calc(100dvh - 168px);
     }
     .mini-tokyo-3d.is-london .london-station-drawer {
         left: 16px;
         right: 16px;
         top: auto;
-        bottom: 16px;
+        bottom: max(16px, env(safe-area-inset-bottom));
         width: auto;
-        max-height: min(72vh, 560px);
+        max-height: min(72dvh, 560px, calc(100dvh - 168px));
         transform: translateY(24px);
     }
     .mini-tokyo-3d.is-london .london-station-drawer.open {

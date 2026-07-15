@@ -161,6 +161,18 @@ export default class {
         this.dtObject.update(instanceID, sectionIndex, nextSectionIndex, timeOffset, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration);
     }
 
+    rebindInstance(instanceID, routeIndex, colorIndex, sectionIndex, nextSectionIndex, progress) {
+        this.dtObject.rebind(
+            instanceID,
+            routeIndex,
+            colorIndex,
+            sectionIndex,
+            nextSectionIndex,
+            this.uniforms.timeOffset.value,
+            progress
+        );
+    }
+
     removeInstance(instanceID) {
         return this.dtObject.remove(instanceID);
     }

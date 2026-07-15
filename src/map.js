@@ -24,8 +24,12 @@ import {
     selectLondonStationCandidate,
     shouldSkipLondonRouteEntry
 } from './helpers/london-live-trains.mjs';
-import { getLondonStationAnchor, smoothLondonStationLine } from './helpers/london-geometry.mjs';
+import { matchObservationsToTrainStates } from './helpers/london-live-train-identity.mjs';
+import { normalizeTfLObservations } from './helpers/london-live-train-observations.mjs';
+import { deriveRendererCommand, DWELL_MIN_MS, transitionTrainState } from './helpers/london-live-train-state.mjs';
+import { getLondonStationAnchor } from './helpers/london-geometry.mjs';
 import { applyLondonStationGroups } from './helpers/london-stations.mjs';
+import { buildLondonTrainRouteFeature } from './helpers/london-train-route-geometry.mjs';
 import { GeoJsonLayer, ThreeLayer, Tile3DLayer, TrafficLayer } from './layers';
 import { loadBusData, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl } from './loader';
 import { AboutPanel, BusPanel, LayerPanel, SharePanel, StationPanel, TrainPanel } from './panels';
@@ -42,21 +46,6 @@ const LONDON_DEFAULT_SEGMENT_SPEED_KM_PER_SEC = 0.012;
 const LONDON_OVERLAP_PROGRESS_SPACING = 0.02;
 const LONDON_ROUTE_FEATURE_ZOOMS = [13, 14, 15, 16, 17, 18];
 const LONDON_THEME_STORAGE_KEY = 'mt3d:london-theme';
-const LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE = [
-    [9, 0.12],
-    [10, 0.24],
-    [11, 0.42],
-    [12, 0.68],
-    [13, 1.0],
-    [14, 1.18],
-    [15, 1.08],
-    [16, 0.9],
-    [17, 0.74],
-    [18, 0.58],
-    [19, 0.48]
-];
-const LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS = 4;
-
 const DEGREE_TO_RADIAN = Math.PI / 180;
 
 function escapeHTML(value) {
@@ -352,6 +341,9 @@ export default class extends Evented {
         me._londonLineStatusLookup = new Map();
         me._londonLineStatusPollMs = 60000;
         me._londonLiveTrainPollMs = 10000;
+        me._londonLiveTrainStates = new Map();
+        me._londonLiveTrainSessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        me._londonLiveTrainSyntheticCounter = 1;
         me._londonTheme = 'light';
         me._londonStationDrawerData = null;
         me._londonStationDrawerRequestId = 0;
@@ -424,22 +416,40 @@ export default class extends Evented {
     }
 
     getLondonFallbackPaintExpressions() {
+        const lineWidth = [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 0.6,
+            10, 1.2,
+            11, 2.2,
+            12, 3.8,
+            13, 5.4,
+            14, 6.2,
+            15, 5.1,
+            16, 4.0,
+            17, 3.0,
+            18, 2.1,
+            19, 1.5
+        ];
+
         return {
-            lineWidth: [
+            lineWidth,
+            lineOffset: [
                 'interpolate',
                 ['linear'],
                 ['zoom'],
-                9, 0.6,
-                10, 1.2,
-                11, 2.2,
-                12, 3.8,
-                13, 5.4,
-                14, 6.2,
-                15, 5.1,
-                16, 4.0,
-                17, 3.0,
-                18, 2.1,
-                19, 1.5
+                9, ['*', ['coalesce', ['get', 'laneOffset'], 0], 2.6],
+                10, ['*', ['coalesce', ['get', 'laneOffset'], 0], 3.2],
+                11, ['*', ['coalesce', ['get', 'laneOffset'], 0], 4.2],
+                12, ['*', ['coalesce', ['get', 'laneOffset'], 0], 5.8],
+                13, ['*', ['coalesce', ['get', 'laneOffset'], 0], 7.4],
+                14, ['*', ['coalesce', ['get', 'laneOffset'], 0], 8.2],
+                15, ['*', ['coalesce', ['get', 'laneOffset'], 0], 7.1],
+                16, ['*', ['coalesce', ['get', 'laneOffset'], 0], 6.0],
+                17, ['*', ['coalesce', ['get', 'laneOffset'], 0], 5.0],
+                18, ['*', ['coalesce', ['get', 'laneOffset'], 0], 4.1],
+                19, ['*', ['coalesce', ['get', 'laneOffset'], 0], 3.5]
             ],
             lineOpacity: [
                 'interpolate',
@@ -562,23 +572,6 @@ export default class extends Evented {
             map.addLayer(layer, beforeId);
         } else {
             map.addLayer(layer);
-        }
-    }
-
-    updateLondon3DRailLineWidthScale(zoom) {
-        const me = this;
-        const map = me.map;
-
-        if (me.getCityFromLocation() !== 'london' || !map || !me._londonHas3dRailLines) {
-            return;
-        }
-
-        const lineWidthScale = getZoomProfileValue(zoom, LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-        for (let z = 13; z <= 18; z++) {
-            const layerId = `london-railways-3d-${z}`;
-            if (map.getLayer(layerId)) {
-                helpersMapbox.setLayerProps(map, layerId, { lineWidthScale });
-            }
         }
     }
 
@@ -995,6 +988,7 @@ export default class extends Evented {
 
         me.dict = data.dict;
         me.featureCollection = data.featureCollection;
+        me.londonRailDisplayData = data.londonRailDisplayData;
 
         me.stations = new Dataset(Station);
         me.railDirections = new Dataset(RailDirection, data.railDirectionData);
@@ -1024,6 +1018,25 @@ export default class extends Evented {
                     });
                 }
                 stationGroupLookup.get(group).stations.push(station);
+            }
+
+            const baseRouteLookup = new Map();
+            featureEach(me.featureCollection, feature => {
+                if (feature.properties && feature.properties.type === 0 && feature.properties.id) {
+                    baseRouteLookup.set(feature.properties.id, feature);
+                }
+            });
+            const displayFeatures = me.londonRailDisplayData &&
+                Array.isArray(me.londonRailDisplayData.features) ? me.londonRailDisplayData.features : [];
+            me._londonTrainRouteSources = new Map();
+            for (const railway of me.railways.getAll()) {
+                const baseFeature = baseRouteLookup.get(railway.id);
+                const result = buildLondonTrainRouteFeature({railway, displayFeatures, baseFeature});
+
+                if (!result) continue;
+                baseFeature.geometry = result.feature.geometry;
+                baseFeature.properties = result.feature.properties;
+                me._londonTrainRouteSources.set(railway.id, result.corridorSources);
             }
         }
 
@@ -1311,49 +1324,10 @@ export default class extends Evented {
             data: helpersGeojson.featureFilter(featureCollection, p => p.altitude === 0)
         });
 
-        // London: add a deck.gl rail line layer so 3D trains align with the line at pitch.
-        if (isLondon && featureCollection && (featureCollection.features || []).length) {
-            me._londonRailGeoBase = me.buildLondonRailGeoJSON();
-            me._londonRailLineDataBase = helpersGeojson.featureFilter(
-                me._londonRailGeoBase,
-                p => p.type === 'railway'
-            );
-            const londonRailLineData = me.getFilteredLondonRailLineGeoJSON();
-
-            for (const zoom of [13, 14, 15, 16, 17, 18]) {
-                const lineWidthScale = getZoomProfileValue(initialZoom, LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-                if (!londonRailLineData.features.length) continue;
-                const layerId = `london-railways-3d-${zoom}`;
-                me.addLayer({
-                    id: layerId,
-                    type: 'geojson',
-                    data: londonRailLineData,
-                    filled: false,
-                    getLineWidth: d => d.properties.width || 8,
-                    getLineColor: d => helpers.colorToRGBArray(d.properties.color || '#0098D4'),
-                    lineWidthUnits: 'pixels',
-                    lineWidthScale,
-                    parameters: { depthTest: false },
-                    minzoom: zoom <= 13 ? 0 : zoom,
-                    maxzoom: zoom >= 18 ? 24 : zoom + 1
-                }, 'trees');
-                if (map.getLayer(layerId)) {
-                    map.setLayoutProperty(layerId, 'visibility', 'visible');
-                }
-            }
-            me._londonHas3dRailLines = true;
-            me.updateLondon3DRailLineWidthScale(initialZoom);
-        }
-
-
-
-        // London fallback rendering (when features.json etc. are not generated)
+        // London display rendering is independent from the train-motion feature collection.
         if (me.getCityFromLocation() === 'london') {
-            const londonGeoBase = me._londonRailGeoBase || me.buildLondonRailGeoJSON();
+            const londonGeoBase = me.buildLondonRailGeoJSON();
             me._londonRailGeoBase = londonGeoBase;
-            if (!me._londonRailLineDataBase) {
-                me._londonRailLineDataBase = helpersGeojson.featureFilter(londonGeoBase, p => p.type === 'railway');
-            }
             const londonGeo = me.getFilteredLondonRailGeoJSON() || londonGeoBase;
             const londonPaint = me.getLondonFallbackPaintExpressions();
             const ensureLondonFallbackLayers = () => {
@@ -1372,7 +1346,7 @@ export default class extends Evented {
                         paint: {
                             'line-color': ['get', 'color'],
                             'line-width': londonPaint.lineWidth,
-                            'line-offset': ['coalesce', ['get', 'lineOffset'], 0],
+                            'line-offset': londonPaint.lineOffset,
                             'line-opacity': londonPaint.lineOpacity
                         }
                     });
@@ -1432,9 +1406,7 @@ export default class extends Evented {
                 if (map.getSource('london-rail')) {
                     map.getSource('london-rail').setData(londonGeo);
                     ensureLondonFallbackLayers();
-                    if (me._londonHas3dRailLines && useLondonLiveTrains3d && map.getLayer('london-railways')) {
-                        map.setLayoutProperty('london-railways', 'visibility', 'none');
-                    } else if (map.getLayer('london-railways')) {
+                    if (map.getLayer('london-railways')) {
                         map.setLayoutProperty('london-railways', 'visibility', 'visible');
                     }
                 } else {
@@ -1444,10 +1416,6 @@ export default class extends Evented {
                     });
 
                     ensureLondonFallbackLayers();
-
-                    if (me._londonHas3dRailLines && useLondonLiveTrains3d) {
-                        map.setLayoutProperty('london-railways', 'visibility', 'none');
-                    }
 
                     // Auto-zoom to the fallback data so it's obvious when it works
                     const bounds = new LngLatBounds();
@@ -1787,10 +1755,6 @@ export default class extends Evented {
                 prevLayerZoom = me.layerZoom,
                 layerZoom = me.layerZoom = getLayerZoom(zoom);
 
-            if (me.getCityFromLocation() === 'london') {
-                me.updateLondon3DRailLineWidthScale(zoom);
-            }
-
             if (zoom < 13) {
                 const lineWidthScale = helpers.clamp(Math.pow(2, zoom - 12), .125, 1);
 
@@ -2035,31 +1999,6 @@ export default class extends Evented {
             return coords;
         };
 
-        const getGroupedRailwayAnchors = railway => {
-            const groups = [];
-
-            for (const station of railway.stations || []) {
-                if (!station) continue;
-                const group = groupBase(station.group || station.id);
-                if (!group) continue;
-                if (groups[groups.length - 1] === group) continue;
-                groups.push(group);
-            }
-
-            if (groups.length < 2) return null;
-
-            const anchors = groups.map(group => {
-                const entry = stationGroupLookup.get(group);
-                return entry && Array.isArray(entry.anchor) ? entry.anchor : null;
-            });
-
-            if (anchors.some(anchor => !Array.isArray(anchor))) {
-                return null;
-            }
-
-            return { groups, anchors };
-        };
-
         const railwayLineCoordsLookup = new Map();
         for (const rw of me.railways.getAll()) {
             if (!rw) continue;
@@ -2188,170 +2127,10 @@ export default class extends Evented {
             });
         }
 
-        const getLineEdgeDistance = edge => {
-            if (!Number.isFinite(edge.distance)) {
-                edge.distance = turfDistance(edge.fromCoord, edge.toCoord);
-            }
-            return edge.distance;
-        };
-        const buildLineAdjacency = edgeMap => {
-            const adjacency = new Map();
-
-            for (const edge of edgeMap.values()) {
-                const distance = getLineEdgeDistance(edge);
-
-                if (!adjacency.has(edge.fromGroup)) adjacency.set(edge.fromGroup, []);
-                if (!adjacency.has(edge.toGroup)) adjacency.set(edge.toGroup, []);
-
-                adjacency.get(edge.fromGroup).push({
-                    node: edge.toGroup,
-                    segmentKey: edge.segmentKey,
-                    distance
-                });
-                adjacency.get(edge.toGroup).push({
-                    node: edge.fromGroup,
-                    segmentKey: edge.segmentKey,
-                    distance
-                });
-            }
-
-            return adjacency;
-        };
-        const getAlternativeLineDistance = (adjacency, fromGroup, toGroup, skippedSegmentKey) => {
-            const distances = new Map([[fromGroup, 0]]);
-            const queue = [{ node: fromGroup, distance: 0 }];
-
-            while (queue.length) {
-                queue.sort((a, b) => a.distance - b.distance);
-                const current = queue.shift();
-
-                if (!current || current.distance !== distances.get(current.node)) continue;
-                if (current.node === toGroup) return current.distance;
-
-                for (const edge of adjacency.get(current.node) || []) {
-                    if (edge.segmentKey === skippedSegmentKey) continue;
-                    const nextDistance = current.distance + edge.distance;
-                    if (nextDistance >= (distances.has(edge.node) ? distances.get(edge.node) : Infinity)) continue;
-                    distances.set(edge.node, nextDistance);
-                    queue.push({
-                        node: edge.node,
-                        distance: nextDistance
-                    });
-                }
-            }
-
-            return Infinity;
-        };
-        const lineEdgeLookup = new Map();
-        for (const rw of me.railways.getAll()) {
-            if (!rw || !Array.isArray(rw.stations) || rw.stations.length < 2) continue;
-
-            const grouped = getGroupedRailwayAnchors(rw);
-            if (!grouped) continue;
-
-            const { groups, anchors } = grouped;
-            const smoothedAnchors = smoothLondonStationLine(anchors, LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS);
-            const lineKey = String(rw.lineId || rw.id || '').toLowerCase();
-            const edgeMap = lineEdgeLookup.get(lineKey) || new Map();
-            if (!lineEdgeLookup.has(lineKey)) {
-                lineEdgeLookup.set(lineKey, edgeMap);
-            }
-
-            for (let i = 0; i < groups.length - 1; i++) {
-                const fromGroup = groups[i];
-                const toGroup = groups[i + 1];
-                const segmentKey = [fromGroup, toGroup].sort().join('|');
-                const startIndex = i * LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS;
-                const endIndex = (i + 1) * LONDON_VISUAL_LINE_SMOOTH_SUBDIVISIONS;
-                const segmentCoords = smoothedAnchors.slice(startIndex, endIndex + 1);
-
-                if (!Array.isArray(segmentCoords) || segmentCoords.length < 2) continue;
-                if (edgeMap.has(segmentKey)) continue;
-
-                edgeMap.set(segmentKey, {
-                    id: `${rw.id}.seg.${i}`,
-                    railwayId: rw.id,
-                    lineId: lineKey,
-                    color: rw.color || '#00a3e0',
-                    segmentKey,
-                    segmentDirection: fromGroup <= toGroup ? 1 : -1,
-                    fromGroup,
-                    toGroup,
-                    fromCoord: anchors[i],
-                    toCoord: anchors[i + 1],
-                    coordinates: segmentCoords,
-                    lineOffset: 0,
-                    distance: turfDistance(anchors[i], anchors[i + 1])
-                });
-            }
-        }
-
-        const segmentFeatures = [];
-        for (const edgeMap of lineEdgeLookup.values()) {
-            const adjacency = buildLineAdjacency(edgeMap);
-
-            for (const edge of edgeMap.values()) {
-                const alternativeDistance = getAlternativeLineDistance(
-                    adjacency,
-                    edge.fromGroup,
-                    edge.toGroup,
-                    edge.segmentKey
-                );
-
-                if (Number.isFinite(alternativeDistance) &&
-                    alternativeDistance <= getLineEdgeDistance(edge) * 1.35) {
-                    continue;
-                }
-
-                segmentFeatures.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: edge.coordinates
-                    },
-                    properties: {
-                        type: 'railway',
-                        id: edge.id,
-                        railwayId: edge.railwayId,
-                        lineId: edge.lineId,
-                        color: edge.color,
-                        segmentKey: edge.segmentKey,
-                        segmentDirection: edge.segmentDirection,
-                        lineOffset: edge.lineOffset
-                    }
-                });
-            }
-        }
-
-        const overlapLookup = new Map();
-        for (const feature of segmentFeatures) {
-            const key = feature.properties.segmentKey;
-            if (!key) continue;
-            const list = overlapLookup.get(key);
-            if (list) {
-                list.push(feature);
-            } else {
-                overlapLookup.set(key, [feature]);
-            }
-        }
-
-        const offsetStepPx = 4;
-        for (const list of overlapLookup.values()) {
-            if (list.length < 2) continue;
-            list.sort((a, b) => {
-                const ra = a.properties.railwayId || '';
-                const rb = b.properties.railwayId || '';
-                return ra.localeCompare(rb);
-            });
-            const center = (list.length - 1) / 2;
-            list.forEach((feature, index) => {
-                const base = (index - center) * offsetStepPx;
-                const direction = feature.properties.segmentDirection || 1;
-                feature.properties.lineOffset = base * direction;
-            });
-        }
-
-        fc.features.push(...segmentFeatures);
+        const displayFeatures = me.londonRailDisplayData &&
+            Array.isArray(me.londonRailDisplayData.features) ?
+            me.londonRailDisplayData.features : [];
+        fc.features.push(...displayFeatures);
         me._londonStationPopupLookup = popupLookup;
         return fc;
     }
@@ -2546,16 +2325,6 @@ export default class extends Evented {
         return buildFeatureCollection(me.getFilteredLondonRailFeatures(base.features));
     }
 
-    getFilteredLondonRailLineGeoJSON() {
-        const me = this;
-        const base = me._londonRailLineDataBase;
-
-        if (!base || !Array.isArray(base.features)) {
-            return null;
-        }
-        return buildFeatureCollection(me.getFilteredLondonRailFeatures(base.features));
-    }
-
     getEffectiveLondonLineFilters() {
         const me = this;
         const lineFilters = me._londonLineFilters || new Set();
@@ -2600,21 +2369,6 @@ export default class extends Evented {
         const filteredGeo = me.getFilteredLondonRailGeoJSON();
         if (filteredGeo && map.getSource('london-rail')) {
             map.getSource('london-rail').setData(filteredGeo);
-        }
-
-        const filtered3d = me.getFilteredLondonRailLineGeoJSON();
-        if (filtered3d) {
-            const lineWidthScale = getZoomProfileValue(map.getZoom(), LONDON_3D_RAIL_LINE_WIDTH_SCALE_PROFILE);
-
-            for (let z = 13; z <= 18; z++) {
-                const layerId = `london-railways-3d-${z}`;
-                if (map.getLayer(layerId)) {
-                    helpersMapbox.setLayerProps(map, layerId, {
-                        data: filtered3d,
-                        lineWidthScale
-                    });
-                }
-            }
         }
 
         if (restartLiveTrains && me.useLondonLiveTrains && me.useLondonLiveTrains3d) {
@@ -3115,6 +2869,122 @@ export default class extends Evented {
             modal
         };
 
+        drawer.innerHTML = [
+            '<div class="london-station-drawer-inner">',
+            '<div class="london-card-header london-station-header">',
+            '<div>',
+            '<h2 class="london-station-title"></h2>',
+            '<div class="london-station-line-strip"></div>',
+            '<div class="london-line-pill-row london-station-line-pills"></div>',
+            '</div>',
+            '<button type="button" class="london-panel-close" aria-label="Close station details">×</button>',
+            '</div>',
+            '<div class="london-station-drawer-body" tabindex="0" aria-label="Station details"></div>',
+            '<div class="london-drawer-footer">',
+            '<button type="button" class="london-primary-button london-center-station"></button>',
+            '<span class="london-drawer-footer-meta"></span>',
+            '</div>',
+            '</div>'
+        ].join('');
+        drawer.setAttribute('aria-hidden', 'true');
+        me._londonUI.drawerTitle = drawer.querySelector('.london-station-title');
+        me._londonUI.drawerLineStrip = drawer.querySelector('.london-station-line-strip');
+        me._londonUI.drawerLinePills = drawer.querySelector('.london-station-line-pills');
+        me._londonUI.drawerClose = drawer.querySelector('.london-panel-close');
+        me._londonUI.drawerBody = drawer.querySelector('.london-station-drawer-body');
+        me._londonUI.drawerCenter = drawer.querySelector('.london-center-station');
+        me._londonUI.drawerUpdated = drawer.querySelector('.london-drawer-footer-meta');
+
+        me._londonUI.drawerClose.addEventListener('click', () => {
+            me._londonStationDrawerScrollState = null;
+            me._londonStationDrawerSelection = null;
+            me.trackObject();
+        });
+        me._londonUI.drawerCenter.addEventListener('click', () => {
+            const selection = me._londonStationDrawerSelection;
+            const coords = selection ? selection.stations.map(station => station.coord).filter(Boolean) : [];
+
+            if (coords.length) {
+                me.map.flyTo({
+                    center: helpersMapbox.getBounds(coords).getCenter(),
+                    zoom: 16,
+                    pitch: me.map.getPitch()
+                });
+            }
+        });
+
+        modal.innerHTML = [
+            '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title" tabindex="-1">',
+            '<div class="london-card-header london-status-header">',
+            '<div>',
+            '<div class="london-card-eyebrow">Network-wide</div>',
+            '<h2 id="london-status-title">Line Status</h2>',
+            '<p class="london-status-updated">Live updates • Waiting for live data</p>',
+            '</div>',
+            '<button type="button" class="london-panel-close" aria-label="Close line status">×</button>',
+            '</div>',
+            '<div class="london-status-dialog-body">',
+            '<div class="london-status-summary-region"></div>',
+            '<div class="london-status-grid"></div>',
+            '</div>',
+            '</div>'
+        ].join('');
+        modal.setAttribute('aria-hidden', 'true');
+        me._londonUI.statusDialog = modal.querySelector('.london-status-dialog');
+        me._londonUI.statusUpdated = modal.querySelector('.london-status-updated');
+        me._londonUI.statusClose = modal.querySelector('.london-panel-close');
+        me._londonUI.statusBody = modal.querySelector('.london-status-dialog-body');
+        me._londonUI.statusSummary = modal.querySelector('.london-status-summary-region');
+        me._londonUI.statusGrid = modal.querySelector('.london-status-grid');
+
+        modal.addEventListener('click', event => {
+            if (event.target === modal) {
+                me.closeLondonStatusModal();
+            }
+        });
+        me._londonUI.statusClose.addEventListener('click', () => {
+            me.closeLondonStatusModal();
+        });
+        modal.addEventListener('transitionend', event => {
+            if (event.target === modal && event.propertyName === 'opacity' && me._londonStatusModalOpen) {
+                me._londonUI.statusClose.focus({preventScroll: true});
+            }
+        });
+        modal.addEventListener('keydown', event => {
+            if (!me._londonStatusModalOpen || event.key !== 'Tab') {
+                return;
+            }
+
+            const focusable = Array.from(me._londonUI.statusDialog.querySelectorAll([
+                'a[href]',
+                'button:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                'textarea:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])'
+            ].join(','))).filter(element => element.offsetParent !== null);
+
+            if (!focusable.length) {
+                event.preventDefault();
+                me._londonUI.statusClose.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (!me._londonUI.statusDialog.contains(document.activeElement)) {
+                event.preventDefault();
+                (event.shiftKey ? last : first).focus();
+            } else if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+
         me.initLondonTheme();
 
         me._londonSearchPanelOpen = typeof window !== 'undefined' ?
@@ -3188,6 +3058,11 @@ export default class extends Evented {
             '</button>',
             '</div>'
         ].join('');
+
+        if (me._londonStatusModalOpen && me._londonStatusInertState && !me._londonStatusInertState.has(ui.topbar)) {
+            me._londonStatusInertState.set(ui.topbar, ui.topbar.inert);
+            ui.topbar.inert = true;
+        }
 
         ui.topbar.querySelector('.london-theme-toggle').addEventListener('click', () => {
             me.toggleLondonTheme();
@@ -3365,15 +3240,68 @@ export default class extends Evented {
     openLondonStatusModal() {
         const me = this;
 
+        if (me._londonStatusModalOpen || !me._londonUI) {
+            return;
+        }
+
+        me._londonStatusTrigger = me._londonUI.topbar.querySelector('.london-status-trigger');
+        me._londonStatusInertState = new Map();
+        const mapCanvas = me.container.querySelector('.mapboxgl-canvas-container');
+        const mapControls = me.container.querySelector('.mapboxgl-control-container');
+        const backgroundTargets = [
+            me._londonUI.topbar,
+            me._londonUI.searchPanel,
+            me._londonUI.drawer,
+            mapCanvas,
+            mapControls
+        ];
+
+        for (const element of backgroundTargets) {
+            if (!element || !element.isConnected || me._londonStatusInertState.has(element)) {
+                continue;
+            }
+            me._londonStatusInertState.set(element, element.inert);
+            element.inert = true;
+        }
         me._londonStatusModalOpen = true;
         me.renderLondonStatusModal();
+        setTimeout(() => {
+            if (me._londonStatusModalOpen && me._londonUI.statusClose.isConnected) {
+                me._londonUI.statusClose.focus({preventScroll: true});
+            }
+        }, 220);
     }
 
     closeLondonStatusModal() {
         const me = this;
 
+        if (!me._londonStatusModalOpen || !me._londonUI) {
+            return;
+        }
+
         me._londonStatusModalOpen = false;
         me.renderLondonStatusModal();
+
+        if (me._londonStatusInertState) {
+            for (const entry of me._londonStatusInertState) {
+                const element = entry[0];
+                const previousValue = entry[1];
+
+                if (element.isConnected) {
+                    element.inert = previousValue;
+                }
+            }
+            me._londonStatusInertState.clear();
+        }
+
+        const statusTrigger = me._londonStatusTrigger;
+
+        setTimeout(() => {
+            if (statusTrigger && statusTrigger.isConnected) {
+                statusTrigger.focus();
+            }
+        }, 0);
+        me._londonStatusTrigger = null;
     }
 
     renderLondonStatusModal() {
@@ -3403,49 +3331,38 @@ export default class extends Evented {
             }).format(new Date(me._londonLineStatusUpdatedAt))
             : 'Waiting for live data';
 
+        const previousScrollTop = ui.statusBody.scrollTop;
+        const activeElement = document.activeElement;
+        const activeElementWasInDialog = activeElement && ui.statusDialog.contains(activeElement);
+
         ui.modal.classList.toggle('open', !!me._londonStatusModalOpen);
-        ui.modal.innerHTML = me._londonStatusModalOpen ? [
-            '<div class="london-status-modal-backdrop"></div>',
-            '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title">',
-            '<div class="london-card-header london-status-header">',
-            '<div>',
-            '<div class="london-card-eyebrow">Network-wide</div>',
-            '<h2 id="london-status-title">Line Status</h2>',
-            `<p>Live updates • ${escapeHTML(updatedLabel)}</p>`,
-            '</div>',
-            '<button type="button" class="london-panel-close" aria-label="Close line status">×</button>',
-            '</div>',
-            severeRecords.length ? [
-                '<div class="london-severe-summary">',
-                '<strong>Severe delays</strong>',
-                `<span>${escapeHTML(severeRecords.map(record => record.title).join(' • '))}</span>`,
-                '</div>'
-            ].join('') : '',
-            '<div class="london-status-grid">',
-            records.map(record => [
-                `<div class="london-status-card ${getLondonStatusTone(record.statusText)}">`,
-                `<span class="london-status-line" style="background-color:${escapeHTML(record.color)};"></span>`,
-                '<div class="london-status-card-copy">',
-                `<strong>${escapeHTML(record.title)}</strong>`,
-                `<span class="status-text ${getLondonStatusTone(record.statusText)}">${escapeHTML(record.statusText)}</span>`,
-                record.reason ? `<span class="status-reason">${escapeHTML(record.reason)}</span>` : '',
-                '</div>',
-                '</div>'
-            ].join('')).join(''),
-            '</div>',
+        ui.modal.setAttribute('aria-hidden', me._londonStatusModalOpen ? 'false' : 'true');
+        ui.statusUpdated.textContent = `Live updates • ${updatedLabel}`;
+        ui.statusSummary.innerHTML = severeRecords.length ? [
+            '<div class="london-severe-summary">',
+            '<strong>Severe delays</strong>',
+            `<span>${escapeHTML(severeRecords.map(record => record.title).join(' • '))}</span>`,
             '</div>'
         ].join('') : '';
+        ui.statusGrid.innerHTML = records.map(record => [
+            `<div class="london-status-card ${getLondonStatusTone(record.statusText)}">`,
+            `<span class="london-status-line" style="background-color:${escapeHTML(record.color)};"></span>`,
+            '<div class="london-status-card-copy">',
+            `<strong>${escapeHTML(record.title)}</strong>`,
+            `<span class="status-text ${getLondonStatusTone(record.statusText)}">${escapeHTML(record.statusText)}</span>`,
+            record.reason ? `<span class="status-reason">${escapeHTML(record.reason)}</span>` : '',
+            '</div>',
+            '</div>'
+        ].join('')).join('');
 
-        if (!me._londonStatusModalOpen) {
-            return;
+        ui.statusBody.scrollTop = Math.min(previousScrollTop, Math.max(0, ui.statusBody.scrollHeight - ui.statusBody.clientHeight));
+        if (me._londonStatusModalOpen && activeElementWasInDialog) {
+            if (activeElement.isConnected && ui.statusDialog.contains(activeElement)) {
+                activeElement.focus();
+            } else {
+                ui.statusClose.focus();
+            }
         }
-
-        ui.modal.querySelector('.london-status-modal-backdrop').addEventListener('click', () => {
-            me.closeLondonStatusModal();
-        });
-        ui.modal.querySelector('.london-panel-close').addEventListener('click', () => {
-            me.closeLondonStatusModal();
-        });
     }
 
     renderLondonStationDrawer() {
@@ -3457,11 +3374,18 @@ export default class extends Evented {
             return;
         }
 
+        if (ui.drawer.classList.contains('open') && me._londonStationDrawerScrollState) {
+            me._londonStationDrawerScrollState.scrollTop = ui.drawerBody.scrollTop;
+        }
+
         ui.drawer.classList.toggle('open', !!selection);
+        ui.drawer.setAttribute('aria-hidden', selection ? 'false' : 'true');
         if (!selection) {
-            ui.drawer.innerHTML = '';
+            me._londonStationDrawerSelection = null;
             return;
         }
+
+        me._londonStationDrawerSelection = selection;
 
         if (me._londonStationHoverPopup && me._londonStationHoverPopup.isOpen()) {
             me._londonStationHoverPopup.remove();
@@ -3482,26 +3406,22 @@ export default class extends Evented {
         const loadingDepartures = !!(drawerData && drawerData.loading);
         const hasLiveDepartureData = departureGroups.length > 0;
         const stationMapLabel = `Center ${title}`;
+        const previousScrollTop = me._londonStationDrawerScrollState && me._londonStationDrawerScrollState.selectionId === selection.id
+            ? me._londonStationDrawerScrollState.scrollTop
+            : 0;
+        const activeElement = document.activeElement;
+        const activeElementWasInDrawer = activeElement && ui.drawer.contains(activeElement);
 
-        ui.drawer.innerHTML = [
-            '<div class="london-station-drawer-inner">',
-            '<div class="london-card-header london-station-header">',
-            '<div>',
-            `<h2>${escapeHTML(title)}</h2>`,
-            '<div class="london-station-line-strip">',
-            stationStatuses.map(record => `<span style="background-color:${escapeHTML(record.color)};"></span>`).join(''),
-            '</div>',
-            '<div class="london-line-pill-row">',
-            stationStatuses.map(record => [
-                `<span class="london-line-pill" style="--line-color:${escapeHTML(record.color)};">`,
-                escapeHTML(record.title),
-                '</span>'
-            ].join('')).join(''),
-            '</div>',
-            '</div>',
-            '<button type="button" class="london-panel-close" aria-label="Close station details">×</button>',
-            '</div>',
-            '<div class="london-station-drawer-body">',
+        ui.drawerTitle.textContent = title;
+        ui.drawerLineStrip.innerHTML = stationStatuses
+            .map(record => `<span style="background-color:${escapeHTML(record.color)};"></span>`)
+            .join('');
+        ui.drawerLinePills.innerHTML = stationStatuses.map(record => [
+            `<span class="london-line-pill" style="--line-color:${escapeHTML(record.color)};">`,
+            escapeHTML(record.title),
+            '</span>'
+        ].join('')).join('');
+        ui.drawerBody.innerHTML = [
             '<section class="london-drawer-section">',
             (disruptedStatuses.length ? disruptedStatuses.map(record => [
                 `<div class="london-status-alert ${getLondonStatusTone(record.statusText)}">`,
@@ -3561,29 +3481,19 @@ export default class extends Evented {
                     '</div>'
                 ].join('')).join('') :
                 '<div class="london-empty-state">No live arrival data is available for this station right now.</div>'),
-            '</section>',
-            '</div>',
-            '<div class="london-drawer-footer">',
-            `<button type="button" class="london-primary-button london-center-station">${escapeHTML(stationMapLabel)}</button>`,
-            `<span class="london-drawer-footer-meta">Last updated ${escapeHTML(updatedLabel)}</span>`,
-            '</div>',
-            '</div>'
+            '</section>'
         ].join('');
+        ui.drawerCenter.textContent = stationMapLabel;
+        ui.drawerUpdated.textContent = `Last updated ${updatedLabel}`;
+        ui.drawerBody.scrollTop = Math.min(previousScrollTop, Math.max(0, ui.drawerBody.scrollHeight - ui.drawerBody.clientHeight));
+        me._londonStationDrawerScrollState = {
+            selectionId: selection.id,
+            scrollTop: ui.drawerBody.scrollTop
+        };
 
-        ui.drawer.querySelector('.london-panel-close').addEventListener('click', () => {
-            me.trackObject();
-        });
-        ui.drawer.querySelector('.london-center-station').addEventListener('click', () => {
-            const coords = selection.stations.map(station => station.coord).filter(Boolean);
-
-            if (coords.length) {
-                me.map.flyTo({
-                    center: helpersMapbox.getBounds(coords).getCenter(),
-                    zoom: 16,
-                    pitch: me.map.getPitch()
-                });
-            }
-        });
+        if (activeElementWasInDrawer && !activeElement.isConnected) {
+            ui.drawerClose.focus();
+        }
     }
 
     getLondonStationIndexLookup(railway) {
@@ -3623,11 +3533,11 @@ export default class extends Evented {
         return me._londonStationDistanceLookup.get(key);
     }
 
-    updateLondonLiveTrafficTrains(arrivals, stationLookup, railway, stationNameKeys) {
+    updateLondonLiveTrafficTrains(arrivals, stationLookup, railway, stationNameKeys, pollMeta = {}) {
         const me = this;
         const railways = Array.isArray(railway) ? railway.filter(Boolean) : (railway ? [railway] : []);
         if (!railways.length || !me.trafficLayer || !me.trafficLayer.addObject) return;
-        const lineKey = String(railways[0].lineId || railways[0].id || 'london');
+        const lineKey = getLondonLineKey(pollMeta.lineId || railways[0].lineId || railways[0].id || 'london');
 
         const stationIndexLookups = new Map();
         const stationOffsetsLookup = new Map();
@@ -3646,101 +3556,72 @@ export default class extends Evented {
         if (!me._londonLiveTrafficTrains) {
             me._londonLiveTrafficTrains = new Map();
         }
+        if (!me._londonLiveTrainStates) {
+            me._londonLiveTrainStates = new Map();
+        }
 
         const nowOffset = me.clock.getTimeOffset();
+        const pollTimestamp = Number.isFinite(pollMeta.timestamp) ? pollMeta.timestamp : Date.now();
+        const pollSucceeded = pollMeta.success !== false;
+        const observationsComplete = pollMeta.observationsComplete !== false;
+        const observations = pollSucceeded && observationsComplete ? normalizeTfLObservations(arrivals, {
+            lineId: lineKey,
+            timestamp: pollTimestamp
+        }) : [];
+        const lineStates = new Map([...me._londonLiveTrainStates].filter(([, state]) => state.lineId === lineKey));
+        const identity = matchObservationsToTrainStates(lineStates, observations, {
+            sessionId: me._londonLiveTrainSessionId,
+            syntheticCounter: me._londonLiveTrainSyntheticCounter
+        });
         const byTrain = new Map();
-        const arr = Array.isArray(arrivals) ? arrivals : [];
+        const seen = new Set();
         const resolveStationInfo = (value, stationIndexLookup) =>
             me.resolveLondonStationInfo(value, stationLookup, stationNameKeys, stationIndexLookup);
         const discardTrain = train => {
             if (!train) return false;
-            seen.add(train.id || train.key);
+            const trainKey = train.id || train.key;
+            const state = me._londonLiveTrainStates.get(trainKey);
+
+            seen.add(trainKey);
+            if (state) {
+                me._londonLiveTrainStates.set(trainKey, {
+                    ...state,
+                    state: 'expired',
+                    stalePhase: 'remove',
+                    rendererToken: null
+                });
+            }
             me.removeLondonLiveTrafficTrain(train);
             return true;
         };
 
-        for (const a of arr) {
-            if (!a) continue;
-            const vehicleId = a.vehicleId || '';
-            const direction = a.direction || '';
-            const dest = a.destinationName || '';
-            const stationName = a.stationName || '';
-            const naptanId = a.naptanId || '';
-            const currentLocation = a.currentLocation || '';
-            let tts = typeof a.timeToStation === 'number' ? a.timeToStation : Number(a.timeToStation);
-            if (!isFinite(tts) && a.expectedArrival) {
-                const expected = Date.parse(a.expectedArrival);
-                if (isFinite(expected)) {
-                    tts = Math.max(0, (expected - Date.now()) / 1000);
-                }
-            }
-            if (!isFinite(tts)) continue;
+        me._londonLiveTrainSyntheticCounter = identity.nextSyntheticCounter;
+        for (const match of identity.matches) {
+            const observation = match.observation;
 
-            const fallbackKeyParts = [
-                direction,
-                dest,
-                a.destinationNaptanId || '',
-                a.towards || '',
-                a.platformName || ''
-            ].filter(Boolean);
-            const fallbackKey = fallbackKeyParts.join('|') || `${stationName}|${direction}|${dest}`;
-            const key = vehicleId ? `${lineKey}|${vehicleId}` : `no-vehicle|${lineKey}|${fallbackKey}`;
-            if (!byTrain.has(key)) {
-                byTrain.set(key, {
-                    key,
-                    vehicleId: vehicleId || key,
-                    direction,
-                    dest,
-                    currentLocation,
-                    arrivals: []
-                });
-            }
-            const entry = byTrain.get(key);
-            if (!entry.direction && direction) {
-                entry.direction = direction;
-            }
-            if (!entry.dest && dest) {
-                entry.dest = dest;
-            }
-            if (!entry.currentLocation && currentLocation) {
-                entry.currentLocation = currentLocation;
-            }
-            const expectedArrival = a.expectedArrival ? Date.parse(a.expectedArrival) : NaN;
-            entry.arrivals.push({
-                stationName,
-                naptanId,
-                timeToStation: tts,
-                currentLocation,
-                expectedArrival,
-                platformName: a.platformName || ''
+            byTrain.set(match.trainKey, {
+                key: match.trainKey,
+                vehicleId: observation.vehicleId || match.syntheticId || match.trainKey,
+                direction: observation.direction,
+                dest: observation.destination,
+                currentLocation: observation.currentLocation,
+                platform: observation.platform,
+                previousState: match.state,
+                identityConfidence: match.identityConfidence,
+                syntheticId: match.syntheticId,
+                observation,
+                arrivals: observation.predictions.map(prediction => ({
+                    stationName: prediction.stationName,
+                    naptanId: prediction.stationId,
+                    timeToStation: prediction.timeToStation,
+                    currentLocation: prediction.currentLocation,
+                    expectedArrival: prediction.expectedArrival,
+                    platformName: prediction.platform
+                }))
             });
         }
 
-        const seen = new Set();
         const pendingUpdates = [];
-        const preserveTrain = (train, patch = {}) => {
-            if (!train) return false;
-            if (!me.hasValidLondonLiveTrafficTrainPosition(train)) {
-                return discardTrain(train);
-            }
-            if (typeof train._londonStartOffset === 'number' && typeof train._londonEndOffset === 'number') {
-                const duration = train._londonEndOffset - train._londonStartOffset;
-                if (duration > 0) {
-                    const predicted = (nowOffset - train._londonStartOffset) / duration;
-                    train._londonProgress = Math.max(0, Math.min(0.99, predicted));
-                }
-            } else if (typeof train._londonProgress === 'number' &&
-                typeof train._londonDurationSec === 'number' &&
-                typeof train._londonLastUpdate === 'number') {
-                const elapsedSec = Math.max(0, (nowOffset - train._londonLastUpdate) / 1000);
-                const predicted = train._londonProgress + (elapsedSec / Math.max(train._londonDurationSec, 0.1));
-                train._londonProgress = Math.max(0, Math.min(0.99, predicted));
-            }
-            Object.assign(train, patch);
-            train._londonLastUpdate = nowOffset;
-            seen.add(train.id || train.key);
-            return true;
-        };
         for (const t of byTrain.values()) {
             let train = me._londonLiveTrafficTrains.get(t.key);
             const candidates = [];
@@ -3821,18 +3702,19 @@ export default class extends Evented {
                 }
             }
 
-            let active = candidates.find(candidate => train && train._londonRailwayId === candidate.railway.id) || null;
+            const currentRouteId = (t.previousState && t.previousState.routeId) ||
+                (train && train._londonRailwayId);
+            const currentCandidate = candidates.find(candidate => currentRouteId === candidate.railway.id) || null;
+            let active = null;
             if (candidates.length) {
                 const getCandidateScore = candidate => candidate.score +
-                    (train && train._londonRailwayId === candidate.railway.id ? 25 : 0);
+                    (currentRouteId === candidate.railway.id ? 25 : 0);
 
                 candidates.sort((a, b) => getCandidateScore(b) - getCandidateScore(a));
-                if (!active || getCandidateScore(candidates[0]) > getCandidateScore(active)) {
-                    active = candidates[0];
-                }
+                active = candidates[0];
             }
             if (!active) {
-                discardTrain(train);
+                seen.add(t.key);
                 continue;
             }
             const {
@@ -3845,14 +3727,6 @@ export default class extends Evented {
                 nextHintStation,
                 locationType
             } = active;
-            if (train) {
-                if (train.r && train.r.id !== railway.id && train.instanceID !== undefined) {
-                    me.removeLondonLiveTrafficTrain(train, { removeFromLookup: false });
-                }
-                train.r = railway;
-                train._londonRailwayId = railway.id;
-            }
-
             predictions.sort((a, b) => a.timeToStation - b.timeToStation);
             const predictionsByIndex = new Map();
             for (const p of predictions) {
@@ -3868,7 +3742,8 @@ export default class extends Evented {
             let progress = 0;
             let durationSec = null;
             const currentIndex = activeCurrentStation ? stationIndexLookup.get(activeCurrentStation.id) : undefined;
-            const isAtStation = locationType === 'at' && currentIndex !== undefined;
+            const previousState = t.previousState;
+            let isAtStation = locationType === 'at' && currentIndex !== undefined;
 
             prevStation = prevHintStation || null;
             nextStation = nextHintStation || null;
@@ -3895,10 +3770,20 @@ export default class extends Evented {
                 between: !!(locationHint && locationHint.type === 'between')
             });
             if (!next) {
-                discardTrain(train);
+                seen.add(t.key);
                 continue;
             }
             let nextIndex = next.stationIndex;
+            const validatedDeparture = isAtStation && previousState && previousState.state === 'dwelling' &&
+                pollTimestamp - previousState.enteredStationAt >= DWELL_MIN_MS &&
+                nextIndex !== currentIndex && Math.abs(nextIndex - currentIndex) === 1;
+
+            if (validatedDeparture) {
+                isAtStation = false;
+                prevStation = activeCurrentStation;
+                prevIndex = currentIndex;
+                nextStation = next.station;
+            }
             const hasLocationHint = !!prevStation || !!nextStation;
 
             if (isAtStation) {
@@ -3911,7 +3796,7 @@ export default class extends Evented {
                 directionStep = Math.sign(nextIndex - currentIndex) || directionStep || (train && Math.sign(train.sectionLength)) || 1;
                 nextIndex = currentIndex + directionStep;
                 if (nextIndex < 0 || nextIndex >= railway.stations.length) {
-                    discardTrain(train);
+                    seen.add(t.key);
                     continue;
                 }
                 prevStation = activeCurrentStation;
@@ -3928,7 +3813,7 @@ export default class extends Evented {
                 nextTimeToStation: next.timeToStation,
                 threshold: LONDON_ROUTE_ENTRY_TTS_THRESHOLD
             })) {
-                discardTrain(train);
+                seen.add(t.key);
                 continue;
             }
 
@@ -3955,18 +3840,18 @@ export default class extends Evented {
 
             if (prevIndex === undefined || prevIndex === nextIndex) {
                 if (!isAtStation) {
-                    discardTrain(train);
+                    seen.add(t.key);
                     continue;
                 }
             }
             if (prevIndex < 0 || nextIndex < 0 || prevIndex >= stationOffsets.length || nextIndex >= stationOffsets.length) {
-                discardTrain(train);
+                seen.add(t.key);
                 continue;
             }
 
             const sectionLength = nextIndex - prevIndex;
             if (Math.abs(sectionLength) > 1) {
-                discardTrain(train);
+                seen.add(t.key);
                 continue;
             }
             let segmentLength = null;
@@ -4038,11 +3923,71 @@ export default class extends Evented {
                 continue;
             }
             progress = Math.max(0, Math.min(0.99, progress));
+            if (isAtStation) {
+                progress = 0.99;
+            }
             const nowEpoch = me.clock.getTime();
             const nextEpoch = isFinite(next.expectedArrival) ? next.expectedArrival : nowEpoch + next.timeToStation * 1000;
             const prevEpoch = isFinite(nextEpoch) ? nextEpoch - duration : NaN;
             const accelTime = duration / 2;
             const accel = 4 / (duration * duration);
+            const stateObservation = {
+                ...t.observation,
+                routeId: railway.id,
+                routeScore: active.score,
+                currentRouteScore: currentCandidate ? currentCandidate.score : -Infinity,
+                routeBoundary: isAtStation,
+                currentRouteInvalid: !!previousState && !currentCandidate,
+                stationId: (activeCurrentStation || next.station) ?
+                    (activeCurrentStation || next.station).id : '',
+                sectionIndex: prevIndex,
+                sectionProgress: progress,
+                atStation: isAtStation,
+                validatedDeparture,
+                hasProgressionEvidence: !isAtStation && !!previousState && (
+                    validatedDeparture ||
+                    previousState.sectionIndex !== prevIndex ||
+                    progress > (previousState.sectionProgress || 0) + 0.001
+                ),
+                currentRouteObservation: previousState ? {
+                    ...t.observation,
+                    routeId: previousState.routeId,
+                    stationId: previousState.stationId,
+                    sectionIndex: previousState.sectionIndex,
+                    sectionProgress: previousState.sectionProgress,
+                    atStation: previousState.state === 'dwelling',
+                    hasProgressionEvidence: false
+                } : null
+            };
+            const transition = transitionTrainState(previousState, stateObservation, candidates, {
+                timestamp: pollTimestamp,
+                success: pollSucceeded,
+                observationsComplete,
+                trainKey: t.key,
+                syntheticId: t.syntheticId,
+                identityConfidence: t.identityConfidence
+            });
+            const nextState = transition.state;
+            const rendererCommand = deriveRendererCommand(previousState, nextState);
+
+            me._londonLiveTrainStates.set(t.key, nextState);
+            seen.add(t.key);
+
+            if (nextState.state === 'expired') {
+                if (train) {
+                    me.removeLondonLiveTrafficTrain(train);
+                }
+                continue;
+            }
+
+            // A challenger route is observed but has not yet passed hysteresis at a
+            // shared boundary. Keep the existing renderer binding untouched.
+            if (nextState.routeId !== railway.id ||
+                transition.diagnostics.includes('jump-multiple-sections')) {
+                continue;
+            }
+
+            progress = nextState.sectionProgress;
 
             if (!train) {
                 train = {
@@ -4055,7 +4000,19 @@ export default class extends Evented {
                 };
                 me._londonLiveTrafficTrains.set(t.key, train);
             }
-            train.r = railway;
+            if (rendererCommand.type === 'rebind' && train.instanceID !== undefined) {
+                me.trafficLayer.rebindObjectRoute(train, {
+                    routeId: railway.id,
+                    railway,
+                    sectionIndex: nextState.sectionIndex,
+                    sectionLength,
+                    progress
+                });
+            } else {
+                train.r = railway;
+                train.sectionIndex = nextState.sectionIndex;
+                train.sectionLength = sectionLength;
+            }
             train._londonRailwayId = railway.id;
             train._londonProgress = progress;
             train._londonDurationSec = durationSec;
@@ -4063,8 +4020,6 @@ export default class extends Evented {
             train._londonStartOffset = startOffset;
             train._londonEndOffset = nextOffset;
 
-            train.sectionIndex = prevIndex;
-            train.sectionLength = sectionLength;
             train.departureStation = prevStation;
             train.arrivalStation = sectionLength === 0 ? activeCurrentStation : (nextStation || next.station);
             train.destinationName = t.dest;
@@ -4080,6 +4035,14 @@ export default class extends Evented {
             if (train.instanceID === undefined) {
                 me.trafficLayer.addObject(train);
             }
+            me._londonLiveTrainStates.set(t.key, {
+                ...nextState,
+                rendererToken: t.key
+            });
+            if (rendererCommand.type !== 'rebind' && (rendererCommand.type === 'hold' ||
+                (previousState && previousState.state === 'dwelling' && nextState.state === 'dwelling'))) {
+                continue;
+            }
             pendingUpdates.push({
                 train,
                 progress,
@@ -4089,7 +4052,6 @@ export default class extends Evented {
                 sectionKey: `${railway.id}|${prevIndex}|${nextIndex}`,
                 timeToStation: next.timeToStation
             });
-            seen.add(t.key);
         }
 
         // De-overlap trains on the same segment by spacing their progress slightly.
@@ -4127,14 +4089,48 @@ export default class extends Evented {
             }
         }
 
-        for (const [key, train] of me._londonLiveTrafficTrains.entries()) {
-            if (!seen.has(key)) {
-                const lastUpdate = train._londonLastUpdate;
-                if (typeof lastUpdate === 'number' && nowOffset - lastUpdate < 60000) {
-                    continue;
+        for (const previousState of identity.unmatchedStates) {
+            const trainKey = previousState.trainKey;
+            const train = me._londonLiveTrafficTrains.get(trainKey);
+            const transition = transitionTrainState(previousState, null, railways, {
+                timestamp: pollTimestamp,
+                success: pollSucceeded,
+                observationsComplete
+            });
+            const nextState = transition.state;
+
+            me._londonLiveTrainStates.set(trainKey, nextState);
+            seen.add(trainKey);
+            if (!train) continue;
+
+            if (nextState.stalePhase === 'freeze' && previousState.stalePhase !== 'freeze') {
+                const duration = 1000;
+                const accelTime = duration / 2;
+                const accel = 4 / (duration * duration);
+                let freezeProgress = train._londonProgress || 0;
+
+                if (typeof train._londonStartOffset === 'number' && typeof train._londonEndOffset === 'number') {
+                    const previousDuration = train._londonEndOffset - train._londonStartOffset;
+
+                    if (previousDuration > 0) {
+                        freezeProgress = Math.max(0, Math.min(
+                            0.99,
+                            (nowOffset - train._londonStartOffset) / previousDuration
+                        ));
+                    }
                 }
-                me.trafficLayer.removeObject(train);
-                me._londonLiveTrafficTrains.delete(key);
+                train._londonProgress = freezeProgress;
+                me.trafficLayer.updateObject(
+                    train,
+                    nowOffset - freezeProgress * duration,
+                    duration,
+                    accelTime,
+                    accel,
+                    accelTime,
+                    accel
+                );
+            } else if (nextState.state === 'expired') {
+                me.removeLondonLiveTrafficTrain(train);
             }
         }
 
@@ -4262,6 +4258,7 @@ export default class extends Evented {
         const me = this;
         if (!me._londonLiveTrafficTrains || !me.trafficLayer || !me.trafficLayer.removeObject) {
             me._londonLiveTrafficTrains = new Map();
+            me._londonLiveTrainStates = new Map();
             return;
         }
 
@@ -4269,6 +4266,7 @@ export default class extends Evented {
             me.removeLondonLiveTrafficTrain(train, { removeFromLookup: false });
         }
         me._londonLiveTrafficTrains.clear();
+        me._londonLiveTrainStates.clear();
     }
 
     removeLondonLiveTrafficTrain(train, { removeFromLookup = true } = {}) {
@@ -4406,13 +4404,23 @@ export default class extends Evented {
                 if (!lineIds.length) return;
                 const byLine = new Map();
                 const failed = [];
+                const pollTimestamp = Date.now();
 
                 await Promise.all(lineIds.map(async lid => {
                     try {
                         const arrivals = await me.fetchTfLJson(`/Line/${encodeURIComponent(lid)}/Arrivals`);
-                        byLine.set(lid, Array.isArray(arrivals) ? arrivals : []);
+                        byLine.set(lid, {
+                            arrivals: Array.isArray(arrivals) ? arrivals : [],
+                            success: true,
+                            observationsComplete: true
+                        });
                     } catch (e) {
                         failed.push(`${lid}: ${e.message}`);
+                        byLine.set(lid, {
+                            arrivals: [],
+                            success: false,
+                            observationsComplete: false
+                        });
                     }
                 }));
 
@@ -4420,10 +4428,21 @@ export default class extends Evented {
                     console.warn('[London live trains] failed lines:', failed.join(' | '));
                 }
 
-                for (const [lid, list] of byLine.entries()) {
+                for (const [lid, result] of byLine.entries()) {
                     const railways = me.getLondonRailwaysByLineId(lid);
                     if (!railways.length) continue;
-                    me.updateLondonLiveTrafficTrains(list, stationLookup, railways, stationNameKeys);
+                    me.updateLondonLiveTrafficTrains(
+                        result.arrivals,
+                        stationLookup,
+                        railways,
+                        stationNameKeys,
+                        {
+                            lineId: lid,
+                            timestamp: pollTimestamp,
+                            success: result.success,
+                            observationsComplete: result.observationsComplete
+                        }
+                    );
                 }
             } catch (e) {
                 // Common causes: missing/invalid app key, network/CORS, TfL rate limit
@@ -5612,7 +5631,7 @@ export default class extends Evented {
                             paint: {
                                 'line-color': ['get', 'color'],
                                 'line-width': londonPaint.lineWidth,
-                                'line-offset': ['coalesce', ['get', 'lineOffset'], 0],
+                                'line-offset': londonPaint.lineOffset,
                                 'line-opacity': londonPaint.lineOpacity
                             }
                         }, 'trees');
@@ -7234,25 +7253,6 @@ function createInterpolant(xs, ys) {
         const diff = x - xs[i], diffSq = diff * diff;
         return ys[i] + c1s[i] * diff + c2s[i] * diffSq + c3s[i] * diff * diffSq;
     };
-}
-
-function getZoomProfileValue(zoom, profile) {
-    if (!Array.isArray(profile) || !profile.length) {
-        return 1;
-    }
-    if (zoom <= profile[0][0]) {
-        return profile[0][1];
-    }
-    for (let i = 1; i < profile.length; i++) {
-        const prev = profile[i - 1];
-        const curr = profile[i];
-
-        if (zoom <= curr[0]) {
-            const ratio = (zoom - prev[0]) / (curr[0] - prev[0] || 1);
-            return prev[1] + (curr[1] - prev[1]) * ratio;
-        }
-    }
-    return profile[profile.length - 1][1];
 }
 
 function getLayerZoom(zoom) {

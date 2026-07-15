@@ -116,7 +116,15 @@
       // City preset (only applies if hash doesn't already specify a view)
       const city = matchCity
         ? decodeURIComponent(matchCity[1]).toLowerCase()
-        : null;
+        : cfg.city
+          ? String(cfg.city).toLowerCase()
+          : "london";
+
+      if (!matchCity && city) {
+        const url = new URL(location.href);
+        url.searchParams.set("city", city);
+        history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      }
 
       if (!options.lang && city === "london") {
         options.lang = "en";
