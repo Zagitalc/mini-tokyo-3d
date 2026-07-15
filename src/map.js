@@ -16,6 +16,7 @@ import * as helpers from './helpers/helpers';
 import { pickObject } from './helpers/helpers-deck';
 import * as helpersGeojson from './helpers/helpers-geojson';
 import * as helpersMapbox from './helpers/helpers-mapbox';
+import {LONDON_ABOUT, LondonModalCoordinator} from './helpers/london-modal-coordinator.mjs';
 import {
     findFollowingLondonPrediction,
     inferLondonDirectionStep,
@@ -2858,8 +2859,11 @@ export default class extends Evented {
         const drawer = helpers.createElement('aside', {
             className: 'london-station-drawer'
         }, root);
-        const modal = helpers.createElement('div', {
+        const statusModal = helpers.createElement('div', {
             className: 'london-status-modal'
+        }, root);
+        const aboutModal = helpers.createElement('div', {
+            className: 'london-about-modal'
         }, root);
 
         me._londonUI = {
@@ -2867,7 +2871,8 @@ export default class extends Evented {
             topbar,
             searchPanel,
             drawer,
-            modal
+            statusModal,
+            aboutModal
         };
 
         drawer.innerHTML = [
@@ -2914,8 +2919,8 @@ export default class extends Evented {
             }
         });
 
-        modal.innerHTML = [
-            '<div class="london-status-dialog" role="dialog" aria-modal="true" aria-labelledby="london-status-title" tabindex="-1">',
+        statusModal.innerHTML = [
+            '<div id="london-status-dialog" class="london-status-dialog" role="dialog" aria-labelledby="london-status-title" tabindex="-1">',
             '<div class="london-card-header london-status-header">',
             '<div>',
             '<div class="london-card-eyebrow">Network-wide</div>',
@@ -2930,60 +2935,72 @@ export default class extends Evented {
             '</div>',
             '</div>'
         ].join('');
-        modal.setAttribute('aria-hidden', 'true');
-        me._londonUI.statusDialog = modal.querySelector('.london-status-dialog');
-        me._londonUI.statusUpdated = modal.querySelector('.london-status-updated');
-        me._londonUI.statusClose = modal.querySelector('.london-panel-close');
-        me._londonUI.statusBody = modal.querySelector('.london-status-dialog-body');
-        me._londonUI.statusSummary = modal.querySelector('.london-status-summary-region');
-        me._londonUI.statusGrid = modal.querySelector('.london-status-grid');
+        statusModal.setAttribute('aria-hidden', 'true');
+        statusModal.inert = true;
+        me._londonUI.statusDialog = statusModal.querySelector('.london-status-dialog');
+        me._londonUI.statusUpdated = statusModal.querySelector('.london-status-updated');
+        me._londonUI.statusClose = statusModal.querySelector('.london-panel-close');
+        me._londonUI.statusBody = statusModal.querySelector('.london-status-dialog-body');
+        me._londonUI.statusSummary = statusModal.querySelector('.london-status-summary-region');
+        me._londonUI.statusGrid = statusModal.querySelector('.london-status-grid');
 
-        modal.addEventListener('click', event => {
-            if (event.target === modal) {
+        aboutModal.innerHTML = [
+            '<div id="london-about-dialog" class="london-about-dialog" role="dialog" aria-labelledby="london-about-title" tabindex="-1">',
+            '<div class="london-card-header london-about-header">',
+            '<div>',
+            '<div class="london-card-eyebrow">About</div>',
+            `<h2 id="london-about-title">${escapeHTML(LONDON_ABOUT.title)}</h2>`,
+            '</div>',
+            '<button type="button" class="london-panel-close" aria-label="Close About Mini London 3D">×</button>',
+            '</div>',
+            '<div class="london-about-dialog-body">',
+            `<p class="london-about-author">Created by ${escapeHTML(LONDON_ABOUT.author)}</p>`,
+            '<div class="london-about-links">',
+            `<a href="${escapeHTML(LONDON_ABOUT.sourceUrl)}" target="_blank" rel="noopener noreferrer">Source code</a>`,
+            `<a href="${escapeHTML(LONDON_ABOUT.upstreamUrl)}" target="_blank" rel="noopener noreferrer">Based on ${escapeHTML(LONDON_ABOUT.upstreamTitle)}</a>`,
+            '</div>',
+            '</div>',
+            '</div>'
+        ].join('');
+        aboutModal.setAttribute('aria-hidden', 'true');
+        aboutModal.inert = true;
+        me._londonUI.aboutDialog = aboutModal.querySelector('.london-about-dialog');
+        me._londonUI.aboutClose = aboutModal.querySelector('.london-panel-close');
+
+        me._londonModalCoordinator = new LondonModalCoordinator({
+            getBackgroundTargets: () => {
+                const mapCanvas = me.container.querySelector('.mapboxgl-canvas-container');
+                const mapControls = me.container.querySelector('.mapboxgl-control-container');
+
+                return [topbar, searchPanel, drawer, mapCanvas, mapControls];
+            },
+            onActivate: name => me.setLondonModalVisibility(name, true),
+            onDeactivate: name => me.setLondonModalVisibility(name, false),
+            onFocus: name => me.focusLondonModal(name),
+            onRestoreFocus: control => {
+                setTimeout(() => {
+                    if (control && control.isConnected) {
+                        control.focus();
+                    }
+                }, 0);
+            }
+        });
+
+        statusModal.addEventListener('click', event => {
+            if (event.target === statusModal && me._londonModalCoordinator.isActive('status')) {
                 me.closeLondonStatusModal();
             }
         });
         me._londonUI.statusClose.addEventListener('click', () => {
             me.closeLondonStatusModal();
         });
-        modal.addEventListener('transitionend', event => {
-            if (event.target === modal && event.propertyName === 'opacity' && me._londonStatusModalOpen) {
-                me._londonUI.statusClose.focus({preventScroll: true});
+        aboutModal.addEventListener('click', event => {
+            if (event.target === aboutModal && me._londonModalCoordinator.isActive('about')) {
+                me.closeLondonAboutModal();
             }
         });
-        modal.addEventListener('keydown', event => {
-            if (!me._londonStatusModalOpen || event.key !== 'Tab') {
-                return;
-            }
-
-            const focusable = Array.from(me._londonUI.statusDialog.querySelectorAll([
-                'a[href]',
-                'button:not([disabled])',
-                'input:not([disabled])',
-                'select:not([disabled])',
-                'textarea:not([disabled])',
-                '[tabindex]:not([tabindex="-1"])'
-            ].join(','))).filter(element => element.offsetParent !== null);
-
-            if (!focusable.length) {
-                event.preventDefault();
-                me._londonUI.statusClose.focus();
-                return;
-            }
-
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-
-            if (!me._londonUI.statusDialog.contains(document.activeElement)) {
-                event.preventDefault();
-                (event.shiftKey ? last : first).focus();
-            } else if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-            }
+        me._londonUI.aboutClose.addEventListener('click', () => {
+            me.closeLondonAboutModal();
         });
 
         me.initLondonTheme();
@@ -2993,11 +3010,11 @@ export default class extends Evented {
             true;
 
         me._londonHandleKeyDown = event => {
-            if (event.key !== 'Escape') {
+            if (me._londonModalCoordinator.activeDialog) {
+                me.handleLondonModalKeyDown(event);
                 return;
             }
-            if (me._londonStatusModalOpen) {
-                me.closeLondonStatusModal();
+            if (event.key !== 'Escape') {
                 return;
             }
             if (isStation(me.trackedObject)) {
@@ -3037,20 +3054,20 @@ export default class extends Evented {
         const isDark = me._londonTheme === 'dark';
 
         ui.topbar.innerHTML = [
-            '<div class="london-brand">',
+            `<button type="button" class="london-brand london-brand-button" aria-label="About Mini London 3D" aria-haspopup="dialog" aria-controls="london-about-dialog" aria-expanded="${!!(me._londonModalCoordinator && me._londonModalCoordinator.isActive('about'))}">`,
             '<div class="london-roundel" aria-hidden="true"><span></span></div>',
             '<div class="london-brand-copy">',
             '<div class="london-brand-title">Mini London 3D</div>',
             '<div class="london-brand-subtitle">Live network map</div>',
             '</div>',
-            '</div>',
+            '</button>',
             '<div class="london-topbar-actions">',
             `<button type="button" class="london-topbar-button london-theme-toggle" aria-pressed="${isDark}" title="Toggle ${isDark ? 'light' : 'dark'} mode">`,
             `<span class="london-theme-toggle-icon" aria-hidden="true">${isDark ? '☾' : '☀'}</span>`,
             `<span class="london-theme-toggle-label">${isDark ? 'Dark' : 'Light'}</span>`,
             '</button>',
             `<button type="button" class="london-topbar-button london-search-toggle${me._londonSearchPanelOpen ? ' active' : ''}" aria-expanded="${me._londonSearchPanelOpen}">Search &amp; Filter</button>`,
-            `<button type="button" class="london-topbar-button london-status-trigger ${statusTone}">`,
+            `<button type="button" class="london-topbar-button london-status-trigger ${statusTone}" aria-haspopup="dialog" aria-controls="london-status-dialog" aria-expanded="${!!(me._londonModalCoordinator && me._londonModalCoordinator.isActive('status'))}">`,
             `<span class="london-status-dot ${statusTone}" aria-hidden="true"></span>`,
             '<span class="london-status-copy">',
             '<span class="london-status-label">Line Status</span>',
@@ -3060,20 +3077,25 @@ export default class extends Evented {
             '</div>'
         ].join('');
 
-        if (me._londonStatusModalOpen && me._londonStatusInertState && !me._londonStatusInertState.has(ui.topbar)) {
-            me._londonStatusInertState.set(ui.topbar, ui.topbar.inert);
-            ui.topbar.inert = true;
-        }
-
         ui.topbar.querySelector('.london-theme-toggle').addEventListener('click', () => {
             me.toggleLondonTheme();
         });
         ui.topbar.querySelector('.london-search-toggle').addEventListener('click', () => {
             me.toggleLondonSearchPanel();
         });
-        ui.topbar.querySelector('.london-status-trigger').addEventListener('click', () => {
+        const aboutTrigger = ui.topbar.querySelector('.london-brand-button');
+        const statusTrigger = ui.topbar.querySelector('.london-status-trigger');
+
+        aboutTrigger.addEventListener('click', () => {
+            me.openLondonAboutModal();
+        });
+        statusTrigger.addEventListener('click', () => {
             me.openLondonStatusModal();
         });
+        if (me._londonModalCoordinator) {
+            me._londonModalCoordinator.refreshInvokingControl('about', aboutTrigger);
+            me._londonModalCoordinator.refreshInvokingControl('status', statusTrigger);
+        }
     }
 
     toggleLondonSearchPanel(force) {
@@ -3238,71 +3260,155 @@ export default class extends Evented {
         });
     }
 
-    openLondonStatusModal() {
+    getLondonModalDescriptor(name) {
         const me = this;
+        const ui = me._londonUI;
 
-        if (me._londonStatusModalOpen || !me._londonUI) {
+        if (!ui) {
+            return null;
+        }
+        if (name === 'about') {
+            return {
+                shell: ui.aboutModal,
+                dialog: ui.aboutDialog,
+                close: ui.aboutClose,
+                trigger: ui.topbar.querySelector('.london-brand-button')
+            };
+        }
+        if (name === 'status') {
+            return {
+                shell: ui.statusModal,
+                dialog: ui.statusDialog,
+                close: ui.statusClose,
+                trigger: ui.topbar.querySelector('.london-status-trigger')
+            };
+        }
+        return null;
+    }
+
+    setLondonModalVisibility(name, open) {
+        const me = this;
+        const descriptor = me.getLondonModalDescriptor(name);
+
+        if (!descriptor) {
             return;
         }
 
-        me._londonStatusTrigger = me._londonUI.topbar.querySelector('.london-status-trigger');
-        me._londonStatusInertState = new Map();
-        const mapCanvas = me.container.querySelector('.mapboxgl-canvas-container');
-        const mapControls = me.container.querySelector('.mapboxgl-control-container');
-        const backgroundTargets = [
-            me._londonUI.topbar,
-            me._londonUI.searchPanel,
-            me._londonUI.drawer,
-            mapCanvas,
-            mapControls
-        ];
-
-        for (const element of backgroundTargets) {
-            if (!element || !element.isConnected || me._londonStatusInertState.has(element)) {
-                continue;
-            }
-            me._londonStatusInertState.set(element, element.inert);
-            element.inert = true;
+        descriptor.shell.classList.toggle('open', open);
+        descriptor.shell.setAttribute('aria-hidden', open ? 'false' : 'true');
+        descriptor.shell.inert = !open;
+        if (open) {
+            descriptor.dialog.setAttribute('aria-modal', 'true');
+        } else {
+            descriptor.dialog.removeAttribute('aria-modal');
         }
-        me._londonStatusModalOpen = true;
-        me.renderLondonStatusModal();
+        if (descriptor.trigger) {
+            descriptor.trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        me._londonStatusModalOpen = name === 'status' ? open : !!(me._londonModalCoordinator && me._londonModalCoordinator.isActive('status'));
+        me._londonAboutModalOpen = name === 'about' ? open : !!(me._londonModalCoordinator && me._londonModalCoordinator.isActive('about'));
+    }
+
+    focusLondonModal(name) {
+        const me = this;
+
         setTimeout(() => {
-            if (me._londonStatusModalOpen && me._londonUI.statusClose.isConnected) {
-                me._londonUI.statusClose.focus({preventScroll: true});
+            const descriptor = me.getLondonModalDescriptor(name);
+
+            if (descriptor && me._londonModalCoordinator.isActive(name) && descriptor.close.isConnected) {
+                descriptor.close.focus({preventScroll: true});
             }
         }, 220);
+    }
+
+    getLondonModalFocusable(dialog) {
+        return Array.from(dialog.querySelectorAll([
+            'a[href]',
+            'button:not([disabled])',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[tabindex]:not([tabindex="-1"])'
+        ].join(','))).filter(element => element.offsetParent !== null && !element.closest('[inert]'));
+    }
+
+    handleLondonModalKeyDown(event) {
+        const me = this;
+        const coordinator = me._londonModalCoordinator;
+        const activeName = coordinator && coordinator.activeDialog;
+        const descriptor = activeName && me.getLondonModalDescriptor(activeName);
+
+        if (!descriptor) {
+            return;
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            coordinator.close(activeName);
+            return;
+        }
+        if (event.key !== 'Tab') {
+            return;
+        }
+
+        const focusable = me.getLondonModalFocusable(descriptor.dialog);
+
+        if (!focusable.length) {
+            event.preventDefault();
+            descriptor.close.focus();
+            return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (!descriptor.dialog.contains(document.activeElement)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    openLondonStatusModal() {
+        const me = this;
+
+        if (!me._londonModalCoordinator || !me._londonUI) {
+            return;
+        }
+        const trigger = me._londonUI.topbar.querySelector('.london-status-trigger');
+
+        if (me._londonModalCoordinator.open('status', trigger)) {
+            me.renderLondonStatusModal();
+        }
     }
 
     closeLondonStatusModal() {
         const me = this;
 
-        if (!me._londonStatusModalOpen || !me._londonUI) {
+        if (me._londonModalCoordinator) {
+            me._londonModalCoordinator.close('status');
+        }
+    }
+
+    openLondonAboutModal() {
+        const me = this;
+
+        if (!me._londonModalCoordinator || !me._londonUI) {
             return;
         }
+        me._londonModalCoordinator.open('about', me._londonUI.topbar.querySelector('.london-brand-button'));
+    }
 
-        me._londonStatusModalOpen = false;
-        me.renderLondonStatusModal();
+    closeLondonAboutModal() {
+        const me = this;
 
-        if (me._londonStatusInertState) {
-            for (const entry of me._londonStatusInertState) {
-                const element = entry[0];
-                const previousValue = entry[1];
-
-                if (element.isConnected) {
-                    element.inert = previousValue;
-                }
-            }
-            me._londonStatusInertState.clear();
+        if (me._londonModalCoordinator) {
+            me._londonModalCoordinator.close('about');
         }
-
-        const statusTrigger = me._londonStatusTrigger;
-
-        setTimeout(() => {
-            if (statusTrigger && statusTrigger.isConnected) {
-                statusTrigger.focus();
-            }
-        }, 0);
-        me._londonStatusTrigger = null;
     }
 
     renderLondonStatusModal() {
@@ -3336,8 +3442,7 @@ export default class extends Evented {
         const activeElement = document.activeElement;
         const activeElementWasInDialog = activeElement && ui.statusDialog.contains(activeElement);
 
-        ui.modal.classList.toggle('open', !!me._londonStatusModalOpen);
-        ui.modal.setAttribute('aria-hidden', me._londonStatusModalOpen ? 'false' : 'true');
+        me.setLondonModalVisibility('status', !!(me._londonModalCoordinator && me._londonModalCoordinator.isActive('status')));
         ui.statusUpdated.textContent = `Live updates • ${updatedLabel}`;
         ui.statusSummary.innerHTML = severeRecords.length ? [
             '<div class="london-severe-summary">',
