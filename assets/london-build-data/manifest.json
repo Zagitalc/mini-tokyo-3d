@@ -1,0 +1,38 @@
+{
+  "description": "Deterministic London runtime data for clean-clone and hosted builds",
+  "sourceCommand": "npm run build && npm run build-data:london:source",
+  "files": {
+    "features.json.gz": {
+      "sha256": "ffa30a50a94e762bfc9eaf42a3a752b4dd9a723cd97139963e7dae0230fba65f",
+      "payloadSha256": "ddf47ded1147a52b9da5cedc86352e5e3d7e052299c976df888c65f859fba1e8"
+    },
+    "london-route-display.json.gz": {
+      "sha256": "3aebf0a0223ed628bb79b999d1082b9df62ce223b35a945e176d5f73bed2c26f",
+      "payloadSha256": "b10d7e4808d398b75360dfa3b4af1e082fe83210bc9085f904db10c573d2afb9"
+    },
+    "rail-directions.json.gz": {
+      "sha256": "df57fa65e0dcc86c6ff1b5e13491835598aa4cfaecee928ef8dfd744d5d5aeef",
+      "payloadSha256": "87d4262995bcb467434c07e8da342a07174b5a17a7de387a3f56380dea8b0d1b"
+    },
+    "railways.json.gz": {
+      "sha256": "c144627f4ed7a3eb86c1fd9a21beb0c8eda092f3176286f3f5239f14c9481e66",
+      "payloadSha256": "611f84235850715920ce4dbfef6261a5a9fc22e68fe62a1f0ef948aad7d0edb2"
+    },
+    "station-groups.json.gz": {
+      "sha256": "8f21c2de4ae4ecf47d5ef8f2530794821b85c5bfcdeaa3c585d74b3e4a4fb337",
+      "payloadSha256": "3a0b2b67808003e378cc0d7c05c0882373d804c9b7868b92a172f132988e410f"
+    },
+    "stations.json.gz": {
+      "sha256": "d8eeab407e3142862d0cdd762c9c2f0a1f3f130c3f43a3389d6dade7a3eb9fe2",
+      "payloadSha256": "1cc10b0486054b950d9f919b7976bd21d50f4876f1abaf08ff0b1a5c79f29065"
+    },
+    "train-types.json.gz": {
+      "sha256": "6731668a37f6a3ed10d77860e21c7ba693c377a061571ffa58564d1d699c1798",
+      "payloadSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "train-vehicles.json.gz": {
+      "sha256": "6731668a37f6a3ed10d77860e21c7ba693c377a061571ffa58564d1d699c1798",
+      "payloadSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  }
+}
