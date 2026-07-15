@@ -1,3 +1,4 @@
+```md
 # Mini London 3D development instructions
 
 ## Scope separation
@@ -10,6 +11,7 @@ Mini London 3D has separate concerns that must not be conflated:
 4. Picking, selection and outlines
 5. Generated London data assets
 6. London UI layout, lifecycle, accessibility and theming
+7. Attribution, licensing and deployment documentation
 
 A task may modify one concern without modifying the others. Follow the explicit task plan and preserve all out-of-scope systems.
 
@@ -29,7 +31,7 @@ When working on London route-display geometry:
 - Geometry and lane output must be deterministic.
 
 These route-specific restrictions do not prohibit an explicitly planned
-vehicle-mesh-only or UI-only change.
+vehicle-mesh-only, UI-only, attribution-only or documentation-only change.
 
 ## London vehicle rendering invariants
 
@@ -53,6 +55,17 @@ When working on London train appearance:
 - Never create geometry or materials per frame or per train.
 - London visual changes must be selected through an explicit London-only option
   or code path, not by changing global defaults.
+- Preserve the existing rendering architecture, fleet count, material count,
+  shader count and draw-call count unless the task plan explicitly permits a change.
+- When visible and GPU-picking meshes share geometry, preserve that relationship
+  unless the agreed plan explicitly requires separation.
+- Preserve lifecycle fade-in and fade-out behaviour, including the ability to
+  reach zero opacity.
+- Compose new opacity factors with existing lifecycle, visibility and search
+  factors rather than replacing them.
+- Do not introduce invisible, zero-area or degenerate geometry solely to satisfy tests.
+- Record geometry metrics before and after geometry changes using consistent
+  vertex and triangle-counting rules.
 
 ## London UI invariants
 
@@ -95,6 +108,94 @@ accessibility or theme styling:
 - Maintain keyboard, pointer and screen-reader access for all modified controls.
 - Do not introduce duplicate modal shells or duplicate control IDs.
 
+## Attribution and licensing invariants
+
+When investigating or modifying map attribution, project credits,
+licensing notices or deployment documentation:
+
+- Distinguish required third-party attribution from optional project branding.
+- Preserve all required Mapbox attribution, including:
+  - the Mapbox logo
+  - linked `© Mapbox` text
+  - `Improve this map` where required by the active Mapbox configuration
+- Preserve visible and linked OpenStreetMap attribution and its applicable
+  licence destination.
+- Do not remove, obscure, clip, recolour into illegibility or replace required
+  provider attribution with Mini London 3D branding.
+- Treat literal `undefined`, `null`, `[object Object]`, blank links and repeated
+  separators as software or configuration defects, not valid attribution text.
+- Trace invalid attribution values to their source configuration, metadata,
+  template, join or flattening logic.
+- Correct missing metadata at its source rather than hiding generated DOM nodes.
+- Filter invalid optional attribution values before passing them to Mapbox.
+- Do not rely on undocumented Mapbox private properties in production code.
+  They may be inspected during read-only diagnosis only.
+- Test compact and expanded attribution states.
+- Test desktop, responsive, light-theme and dark-theme attribution rendering.
+- Verify every required attribution link remains visible, legible and clickable.
+- Verify the attribution control is not duplicated.
+- Do not add `© Mini London 3D` unless the copyright owner and intended scope
+  of that claim are clearly identified.
+- Prefer neutral project credit such as:
+  - `Mini London 3D`
+  - `Mini London 3D · Project source`
+- Preserve applicable upstream Mini Tokyo 3D copyright and licence notices.
+- Do not imply ownership of Mapbox, OpenStreetMap, upstream Mini Tokyo 3D code,
+  data providers or third-party services.
+- Keep project branding separate from required provider attribution.
+- Prefer fuller project, author and upstream-credit information in an About
+  panel, README, licence file or project page when the map control would become
+  overcrowded.
+- Read-only attribution audits must not modify repository files, metadata,
+  styles or runtime configuration.
+- For read-only audits, record HEAD and worktree status before and after the
+  investigation and confirm the repository remains unchanged.
+
+## Deployment documentation invariants
+
+When working on deployment documentation:
+
+- Documentation-only tasks must not deploy the application.
+- Do not create provider projects, DNS records, workflows, hooks, Functions,
+  Workers or deployment-triggering configuration unless explicitly in scope.
+- Do not commit `public/config.local.js`.
+- Do not commit browser-exposed secrets.
+- Treat a public Mapbox token as browser-visible and require suitable URL or
+  origin restrictions.
+- Never embed a TfL application key in:
+  - frontend source
+  - generated static JavaScript
+  - `config.local.js`
+  - HTML
+  - browser-facing environment substitutions
+- Clearly distinguish browser-public configuration from server-side secrets.
+- Document the first-deployment behaviour when a TfL proxy does not yet exist.
+- Unauthenticated TfL access must be described as best-effort and must degrade
+  gracefully when rejected, rate-limited or unavailable.
+- Do not promise reliable live TfL service until a server-side proxy exists.
+- A future proxy must keep the TfL credential server-side and expose only the
+  proxy base URL through the existing `tflProxyBase` option.
+- Explain that build environment variables become public when substituted into
+  static browser assets.
+- Verify the configured build command, output directory and runtime Node version.
+- Verify that the generated deployment output includes required runtime files.
+- Verify provider limits such as:
+  - maximum file count
+  - maximum individual asset size
+  - build allowance
+  - bandwidth or usage constraints
+- Review public metadata before production deployment, including:
+  - page title
+  - description
+  - canonical URL
+  - Open Graph URL
+  - Open Graph image
+  - Twitter or social account metadata
+  - analytics identifiers
+  - project author and repository links
+- Do not leave inherited Mini Tokyo production URLs, analytics IDs or social
+  accounts in a Mini London production build unless explicitly intended.
+
 ## Generated asset invariants
 
 Unless the agreed task explicitly changes generated data:
@@ -109,17 +210,24 @@ Unless the agreed task explicitly changes generated data:
 ## Git workflow
 
 - Follow the branch base and preflight steps defined in the agreed task plan.
-- Do not fetch-and-merge, rebase, reset, or change the branch base when the
-  task plan requires preserving work from another local or remote branch.
+- Do not fetch-and-merge, rebase, reset, recreate a branch or change the branch
+  base when the task plan requires preserving work from another local or remote branch.
 - If the task plan does not specify a branch base:
   - `git fetch origin`
-  - `git merge --ff-only origin/v2`
+  - identify the repository’s current default branch
+  - create or update the task branch from that default branch
   - verify that the worktree is clean
-- Before creating a task branch:
+- Do not assume `origin/v2` is the current default branch.
+- Before creating or continuing a task branch:
   - record the current branch and HEAD
   - verify any required ancestor commit
   - confirm the worktree state
   - preserve known untracked files unless the plan explicitly includes them
+- When a task continues on an existing branch:
+  - confirm the branch name exactly
+  - do not recreate it
+  - do not switch back to the default branch
+  - do not fetch-and-merge unless the task plan requires it
 - Follow the commit sequence defined in the agreed implementation plan.
 - Do not squash, reorder or combine commits unless the plan explicitly permits it.
 - Do not commit generated or unrelated files unless required by the plan.
@@ -132,7 +240,10 @@ Unless the agreed task explicitly changes generated data:
   - review the staged diff
   - run the tests relevant to that phase
   - confirm that out-of-scope invariants remain intact
-- Do not push until the task plan’s validation requirements have passed.
+- Create only the commits permitted by the agreed task plan.
+- Read-only investigation phases must not create commits.
+- Do not push, deploy, squash or rebase until the task plan’s validation
+  requirements have passed.
 
 ## Validation
 
@@ -142,6 +253,7 @@ For every implementation task:
 - Run `npm run lint`.
 - Run `npm run build:london`.
 - Run any focused tests added for the changed subsystem.
+- Run `git diff --check`.
 - Inspect the running London build when the task affects visual rendering or UI.
 - Check the browser console for JavaScript, WebGL, shader and runtime errors.
 - Hash protected generated assets before and after the work.
@@ -150,23 +262,38 @@ For every implementation task:
 - The task must introduce no additional lint errors or warnings.
 - Any lint problem in a changed file must be resolved.
 - Report:
+  - branch and HEAD
   - files changed
+  - commits created
   - tests and builds run
+  - command exit statuses
   - results
   - relevant invariant status
   - asset-hash status
+  - geometry metrics where applicable
   - visual checks performed
   - accessibility checks performed
+  - attribution findings where applicable
   - known limitations
 
 For vehicle-rendering work, additionally verify:
 
 - one train still maps to one `instanceID`
-- visible, picking and outline geometry remain aligned
+- visible and GPU-picking meshes retain the intended shared-geometry relationship
+- visible, picking and outline bounds remain aligned
 - train selection and tracking still resolve the correct object
+- lifecycle fade-in and fade-out still reach zero
+- search dimming and view-mode opacity compose correctly
 - Tokyo rendering remains unchanged
 - buses and aircraft remain unchanged
 - no geometry or material is allocated per frame or per train
+- no unexpected mesh, material, shader, uniform, texture, fleet, instance or
+  draw call is introduced
+- geometry contains no non-finite values
+- geometry contains no degenerate triangles
+- geometry metrics remain within the agreed budget
+- moving-train visual checks cover representative bearings, pitches, themes
+  and travel directions
 
 For London UI work, additionally verify:
 
@@ -187,10 +314,37 @@ For London UI work, additionally verify:
 - non-London UI remains unchanged
 - no new browser console, accessibility or WebGL errors are introduced
 
+For attribution work, additionally verify:
+
+- every visible attribution entry has a known source
+- invalid values are not presented as legal attribution
+- compact and expanded attribution states are correct
+- required Mapbox and OpenStreetMap attribution remains intact
+- provider links are visible, legible and clickable
+- project branding does not replace required attribution
+- London and Tokyo modes are both checked
+- the attribution control is not duplicated
+- read-only audits leave HEAD and worktree status unchanged
+
+For deployment-documentation work, additionally verify:
+
+- no deployment-triggering configuration was added unless explicitly required
+- no secret or local runtime configuration file was committed
+- the documented build produces `build/index.html`
+- required browser runtime configuration is documented accurately
+- the output remains within the selected provider’s file-count and
+  individual-asset limits
+- the expected behaviour of live TfL features before a proxy exists is stated
+- inherited production metadata has been identified for review
+- no deployment or DNS change occurred
+
 ## Subagents
 
 - Use subagents for independent read-only exploration, test review,
-  fixture analysis, performance review, accessibility review and visual verification.
+  fixture analysis, performance review, accessibility review, attribution
+  inspection, deployment-document review and visual verification.
 - Subagents must not commit.
+- Subagents must not modify repository files during read-only investigations.
 - Avoid parallel edits to overlapping files.
 - The main agent owns implementation, integration, validation and commits.
+```
