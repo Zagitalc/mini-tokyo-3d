@@ -4,6 +4,7 @@ import ComputeRenderer from '../gpgpu/compute-renderer';
 import { lerp } from '../helpers/helpers';
 import { hasDarkBackground } from '../helpers/helpers-mapbox';
 import { transactionalRebindLondonTrain } from '../helpers/london-live-train-rebind.mjs';
+import { getLondonTrainOpacityTargets } from '../helpers/london-train-opacity.mjs';
 import {
     getLondonTrainScaleFactor,
     LONDON_TRAIN_DIMENSIONS
@@ -221,7 +222,12 @@ export default class {
             currentOpacity = me.computeRenderer.getOpacity();
         let ugOpacity, ogOpacity;
 
-        if (searchMode !== 'none' && searchMode !== 'edit') {
+        if (me.isLondon) {
+            const targetOpacity = getLondonTrainOpacityTargets(viewMode, searchMode);
+
+            ugOpacity = targetOpacity.underground;
+            ogOpacity = targetOpacity.ground;
+        } else if (searchMode !== 'none' && searchMode !== 'edit') {
             ugOpacity = ogOpacity = .1;
         } else if (viewMode === 'underground') {
             ugOpacity = .9;
