@@ -9,6 +9,19 @@ export const LONDON_TUBE_MARKER_PROFILE = Object.freeze({
     carriageGap: 0.04,
     carriageStep: 0.44,
     carriageCentres: Object.freeze([-0.44, 0, 0.44]),
+    windowLength: 0.23,
+    windowHeight: 0.055,
+    lineBandHeight: 0.014,
+    chassisWidth: 0.20,
+    chassisLength: 0.27,
+    chassisHeight: 0.04,
+    bogieWidth: 0.21,
+    bogieLength: 0.055,
+    bogieHeight: 0.024,
+    cabPanelWidth: 0.25,
+    cabPanelHeight: 0.165,
+    cabWindowWidth: 0.16,
+    cabWindowHeight: 0.055,
     outlineWidth: 0.34,
     outlineLength: 1.32,
     outlineHeight: 0.30,
@@ -107,22 +120,19 @@ export default class extends BufferGeometry {
         for (const centre of LONDON_TUBE_MARKER_PROFILE.carriageCentres) {
             addRoundedBody(centre);
             for (const side of [-1, 1]) {
-                addBox({width: 0.01, length: 0.28, height: 0.07, x: side * 0.155, y: centre, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
-                addBox({width: 0.01, length: 0.36, height: 0.018, x: side * 0.155, y: centre, z: 0.005, partRole: LONDON_TUBE_PART.LINE_DETAIL});
-                for (const doorOffset of [-0.105, 0.105]) {
-                    addBox({width: 0.01, length: 0.055, height: 0.13, x: side * 0.155, y: centre + doorOffset, z: 0.025, partRole: LONDON_TUBE_PART.LINE_DETAIL});
-                }
+                addBox({width: 0.01, length: LONDON_TUBE_MARKER_PROFILE.windowLength, height: LONDON_TUBE_MARKER_PROFILE.windowHeight, x: side * 0.155, y: centre, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
+                addBox({width: 0.01, length: 0.36, height: LONDON_TUBE_MARKER_PROFILE.lineBandHeight, x: side * 0.155, y: centre, z: 0.005, partRole: LONDON_TUBE_PART.LINE_DETAIL});
             }
-            addBox({width: 0.24, length: 0.32, height: 0.055, y: centre, z: -0.105, partRole: LONDON_TUBE_PART.CHASSIS});
+            addBox({width: LONDON_TUBE_MARKER_PROFILE.chassisWidth, length: LONDON_TUBE_MARKER_PROFILE.chassisLength, height: LONDON_TUBE_MARKER_PROFILE.chassisHeight, y: centre, z: -0.105, partRole: LONDON_TUBE_PART.CHASSIS});
             for (const bogieOffset of [-0.11, 0.11]) {
-                addBox({width: 0.27, length: 0.07, height: 0.03, y: centre + bogieOffset, z: -0.125, partRole: LONDON_TUBE_PART.CHASSIS});
+                addBox({width: LONDON_TUBE_MARKER_PROFILE.bogieWidth, length: LONDON_TUBE_MARKER_PROFILE.bogieLength, height: LONDON_TUBE_MARKER_PROFILE.bogieHeight, y: centre + bogieOffset, z: -0.128, partRole: LONDON_TUBE_PART.CHASSIS});
             }
         }
 
         for (const end of [-1, 1]) {
             const y = end * (LONDON_TUBE_MARKER_PROFILE.totalLength / 2 - 0.003);
-            addBox({width: 0.29, length: 0.006, height: 0.205, y, z: 0.03, partRole: LONDON_TUBE_PART.CAB_RED});
-            addBox({width: 0.19, length: 0.004, height: 0.075, y: y - end * 0.004, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
+            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabPanelWidth, length: 0.006, height: LONDON_TUBE_MARKER_PROFILE.cabPanelHeight, y, z: 0.03, partRole: LONDON_TUBE_PART.CAB_RED});
+            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabWindowWidth, length: 0.004, height: LONDON_TUBE_MARKER_PROFILE.cabWindowHeight, y: y - end * 0.004, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
         }
 
         this.setIndex(indices);

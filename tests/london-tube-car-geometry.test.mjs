@@ -5,6 +5,33 @@ import LondonTubeCarGeometry, {
     LONDON_TUBE_PART
 } from '../src/mesh-sets/london-tube-car-geometry.js';
 
+const getGeometryMetrics = geometry => {
+    const vertices = geometry.getAttribute('position').count;
+    const triangles = geometry.index ? geometry.index.count / 3 : vertices / 3;
+
+    return {vertices, triangles};
+};
+
+const getTriangleAreaSquared = (positions, a, b, c) => {
+    const ab = [
+        positions[b * 3] - positions[a * 3],
+        positions[b * 3 + 1] - positions[a * 3 + 1],
+        positions[b * 3 + 2] - positions[a * 3 + 2]
+    ];
+    const ac = [
+        positions[c * 3] - positions[a * 3],
+        positions[c * 3 + 1] - positions[a * 3 + 1],
+        positions[c * 3 + 2] - positions[a * 3 + 2]
+    ];
+    const cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0]
+    ];
+
+    return cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2;
+};
+
 test('London Tube geometry is a centred three-car 4:1 formation', () => {
     const geometry = new LondonTubeCarGeometry();
     const box = geometry.boundingBox;
@@ -28,15 +55,35 @@ test('London Tube geometry is a centred three-car 4:1 formation', () => {
 
 test('London Tube geometry contains every procedural part role within budget', () => {
     const geometry = new LondonTubeCarGeometry();
-    const vertexCount = geometry.getAttribute('position').count;
+    const {vertices, triangles} = getGeometryMetrics(geometry);
     const roles = new Set(geometry.getAttribute('partRole').array);
 
     for (const attribute of ['normal', 'uv', 'groupIndex', 'partRole']) {
-        assert.equal(geometry.getAttribute(attribute).count, vertexCount);
+        assert.equal(geometry.getAttribute(attribute).count, vertices);
     }
     assert.deepEqual([...roles].sort(), Object.values(LONDON_TUBE_PART).sort());
-    assert.ok(geometry.index.count / 3 < 1000);
-    assert.ok(vertexCount < 2000);
+    assert.ok(vertices < 1128);
+    assert.ok(triangles < 540);
+    assert.deepEqual({vertices, triangles}, {vertices: 840, triangles: 396});
+
+    const positions = geometry.getAttribute('position').array;
+    const indices = geometry.index.array;
+    for (let index = 0; index < indices.length; index += 3) {
+        assert.ok(
+            getTriangleAreaSquared(positions, indices[index], indices[index + 1], indices[index + 2]) > 1e-16,
+            `triangle ${index / 3} is degenerate`
+        );
+    }
+});
+
+test('London Tube details use the compact no-door-bar profile', () => {
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.windowLength, 0.23);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.windowHeight, 0.055);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.lineBandHeight, 0.014);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.chassisWidth, 0.20);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.bogieWidth, 0.21);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.cabPanelWidth, 0.25);
+    assert.equal(LONDON_TUBE_MARKER_PROFILE.cabWindowWidth, 0.16);
 });
 
 test('London Tube profile defines a complete formation outline', () => {
