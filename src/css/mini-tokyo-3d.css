@@ -1322,7 +1322,8 @@
 .mini-tokyo-3d.is-london .london-topbar,
 .mini-tokyo-3d.is-london .london-search-panel,
 .mini-tokyo-3d.is-london .london-station-drawer,
-.mini-tokyo-3d.is-london .london-status-modal {
+.mini-tokyo-3d.is-london .london-status-modal,
+.mini-tokyo-3d.is-london .london-about-modal {
     pointer-events: auto;
 }
 .mini-tokyo-3d.is-london .london-topbar {
@@ -1346,6 +1347,26 @@
     display: flex;
     align-items: center;
     gap: 12px;
+}
+.mini-tokyo-3d.is-london .london-brand-button {
+    appearance: none;
+    margin: 0;
+    padding: 4px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--london-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color .18s ease, box-shadow .18s ease;
+}
+.mini-tokyo-3d.is-london .london-brand-button:hover {
+    background: var(--london-hover);
+}
+.mini-tokyo-3d.is-london .london-brand-button:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--london-blue) 72%, #fff);
+    outline-offset: 3px;
 }
 .mini-tokyo-3d.is-london .london-roundel {
     width: 32px;
@@ -1717,7 +1738,8 @@
     border-radius: 999px;
     align-self: stretch;
 }
-.mini-tokyo-3d.is-london .london-status-modal {
+.mini-tokyo-3d.is-london .london-status-modal,
+.mini-tokyo-3d.is-london .london-about-modal {
     position: absolute;
     inset: 0;
     display: flex;
@@ -1732,12 +1754,14 @@
     pointer-events: none;
     transition: opacity .2s ease, visibility .2s ease;
 }
-.mini-tokyo-3d.is-london .london-status-modal.open {
+.mini-tokyo-3d.is-london .london-status-modal.open,
+.mini-tokyo-3d.is-london .london-about-modal.open {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
 }
-.mini-tokyo-3d.is-london .london-status-dialog {
+.mini-tokyo-3d.is-london .london-status-dialog,
+.mini-tokyo-3d.is-london .london-about-dialog {
     width: min(720px, calc(100% - 32px));
     max-height: calc(100dvh - 48px);
     display: flex;
@@ -1750,6 +1774,49 @@
     border-radius: 28px;
     background: var(--london-surface-strong);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.16);
+}
+.mini-tokyo-3d.is-london .london-about-dialog {
+    width: min(480px, calc(100% - 32px));
+}
+.mini-tokyo-3d.is-london .london-about-dialog-body {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 18px;
+    overflow: auto;
+    padding: 4px 2px 2px;
+}
+.mini-tokyo-3d.is-london .london-about-author {
+    margin: 0;
+    color: var(--london-muted);
+    font-size: 15px;
+    line-height: 1.5;
+}
+.mini-tokyo-3d.is-london .london-about-links {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.mini-tokyo-3d.is-london .london-about-links a {
+    display: flex;
+    align-items: center;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--london-border);
+    border-radius: 14px;
+    background: var(--london-card-bg);
+    color: var(--london-blue);
+    font-weight: 700;
+    text-decoration: none;
+    transition: background-color .18s ease, border-color .18s ease;
+}
+.mini-tokyo-3d.is-london .london-about-links a:hover {
+    border-color: color-mix(in srgb, var(--london-blue) 38%, var(--london-border));
+    background: var(--london-hover);
+}
+.mini-tokyo-3d.is-london .london-about-links a:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--london-blue) 72%, #fff);
+    outline-offset: 2px;
 }
 .mini-tokyo-3d.is-london .london-status-dialog-body {
     display: flex;
@@ -2145,5 +2212,19 @@
     }
     .mini-tokyo-3d.is-london .london-secondary-button {
         width: 100%;
+    }
+}
+@media (max-height: 560px) {
+    .mini-tokyo-3d.is-london .london-status-modal,
+    .mini-tokyo-3d.is-london .london-about-modal {
+        align-items: flex-start;
+        padding-top: max(12px, env(safe-area-inset-top));
+        padding-right: max(12px, env(safe-area-inset-right));
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+        padding-left: max(12px, env(safe-area-inset-left));
+    }
+    .mini-tokyo-3d.is-london .london-status-dialog,
+    .mini-tokyo-3d.is-london .london-about-dialog {
+        max-height: calc(100dvh - max(24px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
     }
 }

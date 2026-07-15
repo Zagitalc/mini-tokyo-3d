@@ -75,11 +75,11 @@ vec3 color3 = texelFetch( textureColor, reference, 0 ).rgb;
 
 #ifdef CAR
 #ifdef LONDON_TUBE
-vInstanceColor = partRole < 0.5 ? vec3( 0.875, 0.890, 0.902 ) :
-    partRole < 1.5 ? vec3( 0.125, 0.157, 0.184 ) :
+vInstanceColor = partRole < 0.5 ? vec3( 0.820, 0.835, 0.850 ) :
+    partRole < 1.5 ? vec3( 0.180, 0.200, 0.220 ) :
     partRole < 2.5 ? color0 :
-    partRole < 3.5 ? vec3( 0.090, 0.106, 0.118 ) :
-    vec3( 0.816, 0.133, 0.176 );
+    partRole < 3.5 ? vec3( 0.150, 0.165, 0.180 ) :
+    vec3( 0.700, 0.120, 0.150 );
 #else
 float mod3 = mod( groupIndex, 3.0 );
 vec3 null = vec3( 0.0, 1.0, 0.0 );
