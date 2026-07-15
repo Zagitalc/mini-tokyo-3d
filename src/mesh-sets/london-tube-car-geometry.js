@@ -1,7 +1,21 @@
 import {BufferAttribute, BufferGeometry} from 'three';
 
+export const LONDON_TUBE_CAB_PROFILE = Object.freeze({
+    panelDepth: 0.006,
+    windowDepth: 0.002,
+    layerGap: 0.001
+});
+
+const LONDON_TUBE_NOMINAL_LENGTH = 1.28;
+const bodyHalfLength = LONDON_TUBE_NOMINAL_LENGTH / 2;
+const panelCentreDistance = bodyHalfLength + LONDON_TUBE_CAB_PROFILE.layerGap + LONDON_TUBE_CAB_PROFILE.panelDepth / 2;
+const panelOuterDistance = panelCentreDistance + LONDON_TUBE_CAB_PROFILE.panelDepth / 2;
+const windowCentreDistance = panelOuterDistance + LONDON_TUBE_CAB_PROFILE.layerGap + LONDON_TUBE_CAB_PROFILE.windowDepth / 2;
+const renderedHalfLength = windowCentreDistance + LONDON_TUBE_CAB_PROFILE.windowDepth / 2;
+
 export const LONDON_TUBE_MARKER_PROFILE = Object.freeze({
-    totalLength: 1.28,
+    totalLength: LONDON_TUBE_NOMINAL_LENGTH,
+    renderedLength: renderedHalfLength * 2,
     width: 0.32,
     height: 0.28,
     carriageCount: 3,
@@ -130,9 +144,8 @@ export default class extends BufferGeometry {
         }
 
         for (const end of [-1, 1]) {
-            const y = end * (LONDON_TUBE_MARKER_PROFILE.totalLength / 2 - 0.003);
-            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabPanelWidth, length: 0.006, height: LONDON_TUBE_MARKER_PROFILE.cabPanelHeight, y, z: 0.03, partRole: LONDON_TUBE_PART.CAB_RED});
-            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabWindowWidth, length: 0.004, height: LONDON_TUBE_MARKER_PROFILE.cabWindowHeight, y: y - end * 0.004, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
+            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabPanelWidth, length: LONDON_TUBE_CAB_PROFILE.panelDepth, height: LONDON_TUBE_MARKER_PROFILE.cabPanelHeight, y: end * panelCentreDistance, z: 0.03, partRole: LONDON_TUBE_PART.CAB_RED});
+            addBox({width: LONDON_TUBE_MARKER_PROFILE.cabWindowWidth, length: LONDON_TUBE_CAB_PROFILE.windowDepth, height: LONDON_TUBE_MARKER_PROFILE.cabWindowHeight, y: end * windowCentreDistance, z: 0.065, partRole: LONDON_TUBE_PART.WINDOWS});
         }
 
         this.setIndex(indices);
