@@ -13,15 +13,15 @@ export function composeLondonTrainOpacity({
 }
 
 export function getLondonTrainOpacityTargets(viewMode, searchMode) {
-    const searchModeOpacity = searchMode !== 'none' && searchMode !== 'edit'
-        ? LONDON_TRAIN_OPACITY.searchDimmed
-        : 1;
-    const groundViewOpacity = viewMode === 'underground'
-        ? LONDON_TRAIN_OPACITY.secondary
-        : LONDON_TRAIN_OPACITY.focused;
-    const undergroundViewOpacity = viewMode === 'underground'
-        ? LONDON_TRAIN_OPACITY.focused
-        : LONDON_TRAIN_OPACITY.secondary;
+    const searchModeOpacity = searchMode !== 'none' && searchMode !== 'edit' ?
+        LONDON_TRAIN_OPACITY.searchDimmed :
+        1;
+    const groundViewOpacity = viewMode === 'underground' ?
+        LONDON_TRAIN_OPACITY.secondary :
+        LONDON_TRAIN_OPACITY.focused;
+    const undergroundViewOpacity = viewMode === 'underground' ?
+        LONDON_TRAIN_OPACITY.focused :
+        LONDON_TRAIN_OPACITY.secondary;
 
     return {
         ground: composeLondonTrainOpacity({
